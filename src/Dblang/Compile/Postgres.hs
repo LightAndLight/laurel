@@ -1,19 +1,28 @@
-{-# OPTIONS_GHC -Wno-unused-imports #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Dblang.Compile.Postgres (compileDefinition, compileQuery) where
 
-import Bound (instantiate1)
-import Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NonEmpty
+import Bound (fromScope)
+import Bound.Var (unvar)
+import Data.Foldable (foldr')
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HashSet
 import Data.Text (Text)
 import Data.Text.Lazy.Builder (Builder)
 import qualified Data.Text.Lazy.Builder as Builder
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
-import Data.Void (Void, absurd)
 import Dblang.Definition (Definition)
 import Dblang.Expr (Expr)
 import qualified Dblang.Expr as Expr
+import Dblang.Type (Type)
+import qualified Dblang.Type as Type
+
+data VarOrigin
+  = TableVar
+  | ColumnVar
+
+data VarInfo = VarInfo {name :: Text, type_ :: Type, origin :: VarOrigin}
 
 compileDefinition :: Definition -> Builder
 compileDefinition = error "TODO: compileDefinition"
@@ -28,35 +37,42 @@ commaSep items =
 parens :: Builder -> Builder
 parens x = "(" <> x <> ")"
 
-queryParens :: (Expr Void -> Builder) -> Expr Void -> Builder
+queryParens :: (Expr a -> Builder) -> Expr a -> Builder
 queryParens f expr =
   case expr of
     Expr.Name{} -> f expr
+    Expr.App{} -> f expr
     _ -> parens $ f expr
 
+data TableExpr = TableExpr {value :: Builder, freeVars :: HashSet Text}
+
 data Select
-  = Select {expr :: Builder, from :: Builder, froms :: [From]}
+  = Select {expr :: Builder, from :: TableExpr, froms :: [From]}
   | Yield {expr :: Builder}
 
-data From = CrossJoin Builder
+data From = CrossJoin {lateral :: Bool, tableExpr :: TableExpr}
 
 printSelect :: Select -> Builder
 printSelect select =
   case select of
-    Select{expr, from, froms} -> "SELECT " <> expr <> " FROM " <> from <> foldMap ((" " <>) . printFrom) froms
-    Yield{expr} -> "SELECT " <> expr <> " FROM (VALUES (null))"
+    Select{expr, from, froms} -> "SELECT " <> expr <> " FROM " <> from.value <> foldMap ((" " <>) . printFrom) froms
+    Yield{expr} -> "VALUES " <> parens expr
 
 printFrom :: From -> Builder
 printFrom from =
   case from of
-    CrossJoin value -> "CROSS JOIN " <> value
+    CrossJoin{lateral, tableExpr} -> "CROSS JOIN " <> (if lateral then "LATERAL " else "") <> tableExpr.value
+
+isReferencedBy :: Text -> TableExpr -> Bool
+isReferencedBy name tableExpr =
+  name `HashSet.member` tableExpr.freeVars
 
 -- | Compile an `Expr` of type `Relation a`
-compileRelation :: Expr Void -> Select
-compileRelation expr =
+compileRelation :: (a -> VarInfo) -> Expr a -> Select
+compileRelation varInfo expr =
   case expr of
-    Expr.Var name ->
-      absurd name
+    Expr.Var{} ->
+      error "TODO: compileRelation Var"
     -- name : Relation a
     Expr.Name{} ->
       error "TODO: compileRelation Name"
@@ -67,38 +83,23 @@ compileRelation expr =
     Expr.Dot{} ->
       error "TODO: compileRelation Dot"
     Expr.Yield value ->
-      Yield{expr = compileSelectList value}
-    Expr.From relation rest ->
+      Yield{expr = compileSelectList varInfo value}
+    Expr.From relation name type_ rest ->
       -- relation : Relation a
-      -- rest : a -> Relation b
-      case rest of
-        Expr.Var name ->
-          absurd name
-        -- name : a -> Relation b
-        Expr.Name{} ->
-          error "TODO: compileRelation/From: Name"
-        -- r.x : a -> Relation b
-        Expr.Dot{} ->
-          error "TODO: compileRelation/From: Dot"
-        -- f x_1 x_2 ... x_n : a -> Relation b
-        Expr.App{} ->
-          error "TODO: compileRelation/From: App"
-        -- (\x -> y) : a -> Relation b
-        Expr.Lam name body ->
-          let relation' = queryParens compileQuery relation <> " AS " <> Builder.fromText name
-           in case compileRelation (instantiate1 (Expr.Name name) body) of
-                Yield{expr = yieldExpr} -> Select{expr = yieldExpr, from = relation', froms = []}
-                Select{expr = selectExpr, from, froms} -> Select{expr = selectExpr, from = relation', froms = CrossJoin from : froms}
-        -- yield : Relation ?
-        Expr.Yield{} ->
-          error "compileRelation/From: impossible Yield"
-        -- from a b : Relation ?
-        Expr.From{} ->
-          error "compileRelation/From: impossible From"
-        Expr.Splat{} ->
-          error "compileRelation/From: impossible Splat"
-        Expr.Record{} ->
-          error "compileRelation/From: impossible Splat"
+      let relation' =
+            TableExpr
+              { value = queryParens (compileQuery varInfo) relation <> " AS " <> Builder.fromText name
+              , freeVars = foldr' (HashSet.insert . (.name) . varInfo) mempty relation
+              }
+       in case compileRelation (unvar (\() -> VarInfo{name, type_, origin = TableVar}) varInfo) (fromScope rest) of
+            Yield{expr = yieldExpr} ->
+              Select{expr = yieldExpr, from = relation', froms = []}
+            Select{expr = selectExpr, from, froms} ->
+              Select
+                { expr = selectExpr
+                , from = relation'
+                , froms = CrossJoin{lateral = name `isReferencedBy` from, tableExpr = from} : froms
+                }
     Expr.Lam{} ->
       error "compileRelation: impossible Lam"
     Expr.Splat{} ->
@@ -106,63 +107,68 @@ compileRelation expr =
     Expr.Record{} ->
       error "compileRelation: impossible Splat"
 
-compileQuery :: Expr Void -> Builder
-compileQuery expr =
+compileQuery :: (a -> VarInfo) -> Expr a -> Builder
+compileQuery varInfo expr =
   case expr of
-    Expr.Var name ->
-      absurd name
+    Expr.Var{} ->
+      error "TODO: compileExpr Var"
     Expr.Name name ->
       Builder.fromText name
-    Expr.Lam name body ->
-      error "TODO: compileExpr Lam" name body
+    Expr.Lam{} ->
+      error "TODO: compileExpr Lam"
     Expr.Yield{} ->
-      printSelect $ compileRelation expr
+      printSelect $ compileRelation varInfo expr
     Expr.From{} ->
-      printSelect $ compileRelation expr
+      printSelect $ compileRelation varInfo expr
     Expr.App{} ->
-      "SELECT "
-        <> compileSelectList expr
-        <> " FROM (VALUES (null))"
+      compileExpr varInfo expr
     Expr.Dot{} ->
-      "SELECT "
-        <> compileSelectList expr
-        <> " FROM (VALUES (null))"
+      "VALUES " <> parens (compileSelectList varInfo expr)
     Expr.Splat{} ->
-      "SELECT "
-        <> compileSelectList expr
-        <> " FROM (VALUES (null))"
+      "VALUES " <> parens (compileSelectList varInfo expr)
     Expr.Record{} ->
-      "SELECT "
-        <> compileSelectList expr
-        <> " FROM (VALUES (null))"
+      "VALUES " <> parens (compileSelectList varInfo expr)
 
-compileSelectList :: Expr Void -> Builder
-compileSelectList expr =
+compileSelectList :: (a -> VarInfo) -> Expr a -> Builder
+compileSelectList varInfo expr =
   case expr of
-    Expr.Var name ->
-      absurd name
     Expr.Name name ->
       Builder.fromText name
+    Expr.Var var ->
+      let info = varInfo var
+       in case info.type_ of
+            Type.App (Type.Name "Record") _ ->
+              Builder.fromText info.name <> ".*"
+            _ ->
+              Builder.fromText info.name
     Expr.Lam{} ->
       error "TODO: compileSelectList Lam"
     Expr.Yield{} ->
       error "TODO: compileSelectList Yield"
     Expr.From{} ->
       error "TODO: compileSelectList From"
-    Expr.App function args ->
-      Builder.fromText function <> "(" <> commaSep (fmap compileExpr args) <> ")" <> " AS it"
-    Expr.Dot expr' name ->
-      compileExpr expr' <> "." <> Builder.fromText name <> " AS it"
     Expr.Splat expr' names ->
-      commaSep (fmap (\name -> compileExpr expr' <> "." <> Builder.fromText name <> " AS " <> Builder.fromText name) names)
+      commaSep (fmap (\name -> compileExpr varInfo expr' <> "." <> Builder.fromText name <> " AS " <> Builder.fromText name) names)
     Expr.Record fields ->
-      commaSep (fmap (\(name, value) -> compileExpr value <> " AS " <> Builder.fromText name) fields)
+      commaSep (fmap (\(name, value) -> compileExpr varInfo value <> " AS " <> Builder.fromText name) fields)
+    Expr.App type_ _ _ ->
+      case type_ of
+        Type.App (Type.Name "Record") _ ->
+          parens (compileExpr varInfo expr) <> ".*"
+        _ ->
+          compileExpr varInfo expr <> " AS it"
+    Expr.Dot type_ _ _ ->
+      case type_ of
+        Type.App (Type.Name "Record") _ ->
+          parens (compileExpr varInfo expr) <> ".*"
+        _ ->
+          compileExpr varInfo expr <> " AS it"
 
-compileExpr :: Expr Void -> Builder
-compileExpr expr =
+compileExpr :: (a -> VarInfo) -> Expr a -> Builder
+compileExpr varInfo expr =
   case expr of
-    Expr.Var name ->
-      absurd name
+    Expr.Var var ->
+      Builder.fromText (varInfo var).name
     Expr.Name name ->
       Builder.fromText name
     Expr.Lam{} ->
@@ -171,11 +177,29 @@ compileExpr expr =
       error "TODO: compileExpr Yield"
     Expr.From{} ->
       error "TODO: compileExpr From"
-    Expr.App function args ->
-      Builder.fromText function <> "(" <> commaSep (fmap compileExpr args) <> ")"
-    Expr.Dot expr' name ->
-      compileExpr expr' <> "." <> Builder.fromText name
+    Expr.App _ function args ->
+      case function of
+        Expr.Name name ->
+          Builder.fromText name <> "(" <> commaSep (fmap (compileExpr varInfo) args) <> ")"
+        _ ->
+          error "TODO: compileExpr App"
+    Expr.Dot _ expr' name ->
+      ( case expr' of
+          Expr.Name{} ->
+            id
+          Expr.Var var ->
+            case (varInfo var).origin of
+              TableVar ->
+                id
+              ColumnVar ->
+                parens
+          _ ->
+            parens
+      )
+        (compileExpr varInfo expr')
+        <> "."
+        <> Builder.fromText name
     Expr.Splat expr' names ->
-      "ROW" <> parens (commaSep (fmap (\name -> compileExpr expr' <> "." <> Builder.fromText name) names))
+      "ROW" <> parens (commaSep (fmap (\name -> compileExpr varInfo expr' <> "." <> Builder.fromText name) names))
     Expr.Record fields ->
-      "ROW" <> parens (commaSep (fmap (\(_name, value) -> compileExpr value) fields))
+      "ROW" <> parens (commaSep (fmap (\(_name, value) -> compileExpr varInfo value) fields))
