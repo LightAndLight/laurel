@@ -45,6 +45,16 @@ spec = do
                       Yield (Dot (Type.Name "Int") (Var $ B ()) "z")
                 , "SELECT y.z AS it FROM people AS x CROSS JOIN LATERAL test(x) AS y"
                 )
+          ,
+            ( "from people (\\(person : Person) -> when (person.age == 25) (yield person.name))"
+            , From
+                (Name "people")
+                "person"
+                (Type.Name "Person")
+                . toScope
+                $ When (Equals (Dot (Type.Name "Int") (Var $ B ()) "age") (Int 25)) (Yield (Dot (Type.Name "String") (Var (B ())) "name"))
+            , "SELECT person.name AS it FROM people AS person WHERE person.age = 25"
+            )
           ]
       for_ testCases $ \(label, input, expected) ->
         it ("compiles \"" <> label <> "\"") $ do
