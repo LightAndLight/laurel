@@ -55,6 +55,21 @@ spec = do
                 $ When (Equals (Dot (Type.Name "Int") (Var $ B ()) "age") (Int 25)) (Yield (Dot (Type.Name "String") (Var (B ())) "name"))
             , "SELECT person.name AS it FROM people AS person WHERE person.age = 25"
             )
+          ,
+            ( "from people (\\(person1 : Person) -> from people (\\(person2 : Person) -> when (person1.id == person2.id) (yield person1)))"
+            , From
+                (Name "people")
+                "person1"
+                (Type.Name "Person")
+                . toScope
+                $ From
+                  (Name "people")
+                  "person2"
+                  (Type.Name "Person")
+                  . toScope
+                $ When (Equals (Dot (Type.Name "Int") (Var $ F $ B ()) "id") (Dot (Type.Name "Int") (Var $ B ()) "id")) (Yield $ Var $ F $ B ())
+            , "SELECT person1 FROM people AS person1 INNER JOIN people AS person2 ON person1.id = person2.id"
+            )
           ]
       for_ testCases $ \(label, input, expected) ->
         it ("compiles \"" <> label <> "\"") $ do
