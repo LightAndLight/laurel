@@ -26,6 +26,7 @@ library
         Dblang.Compile.Postgres
         Dblang.Definition
         Dblang.Expr
+        Dblang.Parse
         Dblang.Syntax
         Dblang.Type
         Dblang.Typecheck
@@ -33,8 +34,11 @@ library
         base ^>=4.16.4.0,
         bound,
         deriving-compat,
+        mtl,
         unordered-containers,
+        parsers,
         text >=2.0,
+        sage,
         vector
     hs-source-dirs:   src
     default-language: Haskell2010
@@ -57,9 +61,11 @@ test-suite dblang-test
     main-is:          Main.hs
     other-modules:
         Test.Dblang.Compile.Postgres
+        Test.Dblang.Parse
     build-depends:
         base ^>=4.16.4.0,
         bound,
         dblang,
         hspec,
+        sage,
         text

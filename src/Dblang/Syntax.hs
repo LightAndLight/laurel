@@ -20,6 +20,14 @@ data Expr a
     Dot (Expr a) Text
   | -- | `r.{ x, y, z }`
     Splat (Expr a) (Vector Text)
+  | -- | `for a in as rest`
+    For Text (Expr a) (Scope () Expr a)
+  | -- | `where b rest`
+    Where (Expr a) (Expr a)
+  | -- | `yield a`
+    Yield (Expr a)
+  | Record (Vector (Text, Expr a))
+  | Equals (Expr a) (Expr a)
   deriving (Functor, Foldable, Traversable)
 
 instance Applicative Expr where
@@ -33,6 +41,11 @@ instance Monad Expr where
   App a b >>= f = App (a >>= f) (b >>= f)
   Dot a b >>= f = Dot (a >>= f) b
   Splat a b >>= f = Splat (a >>= f) b
+  For name a b >>= f = For name (a >>= f) (b >>>= f)
+  Where a b >>= f = Where (a >>= f) (b >>= f)
+  Yield a >>= f = Yield (a >>= f)
+  Record fields >>= f = Record $ (fmap . fmap) (>>= f) fields
+  Equals a b >>= f = Equals (a >>= f) (b >>= f)
 
 deriveEq1 ''Expr
 deriveShow1 ''Expr

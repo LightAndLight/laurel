@@ -20,9 +20,10 @@ data Expr a
   | -- | `f x`
     App Type (Expr a) (Vector (Expr a))
   | Yield (Expr a)
-  | From (Expr a) Text Type (Scope () Expr a)
+  | -- | `for a in as rest`
+    For Text Type (Expr a) (Scope () Expr a)
   | Filter Text Type (Scope () Expr a) (Expr a)
-  | When (Expr a) (Expr a)
+  | Where (Expr a) (Expr a)
   | -- | `r.x`
     Dot Type (Expr a) Text
   | -- | `r.{ x, y, z }`
@@ -42,9 +43,9 @@ instance Monad Expr where
   Lam name body >>= f = Lam name (body >>>= f)
   App t a b >>= f = App t (a >>= f) (fmap (>>= f) b)
   Yield a >>= f = Yield (a >>= f)
-  From a name ty b >>= f = From (a >>= f) name ty (b >>>= f)
+  For name ty a b >>= f = For name ty (a >>= f) (b >>>= f)
   Filter name ty a b >>= f = Filter name ty (a >>>= f) (b >>= f)
-  When a b >>= f = When (a >>= f) (b >>= f)
+  Where a b >>= f = Where (a >>= f) (b >>= f)
   Dot t a b >>= f = Dot t (a >>= f) b
   Splat a b >>= f = Splat (a >>= f) b
   Record a >>= f = Record ((fmap . fmap) (>>= f) a)
@@ -70,12 +71,12 @@ typeOf varType expr =
       error "TODO: typeOf: App"
     Yield a ->
       Type.App (Type.Name "Relation") (typeOf varType a)
-    From{} ->
-      error "TODO: typeOf: From"
+    For{} ->
+      error "TODO: typeOf: For"
     Filter{} ->
       error "TODO: typeOf: Filter"
-    When{} ->
-      error "TODO: typeOf: When"
+    Where{} ->
+      error "TODO: typeOf: Where"
     Dot{} ->
       error "TODO: typeOf: Dot"
     Splat{} ->
