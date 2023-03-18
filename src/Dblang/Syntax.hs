@@ -30,6 +30,7 @@ data Expr a
   | Equals (Expr a) (Expr a)
   | Int Int
   | Bool Bool
+  | String Text
   deriving (Functor, Foldable, Traversable)
 
 instance Applicative Expr where
@@ -50,6 +51,7 @@ instance Monad Expr where
   Equals a b >>= f = Equals (a >>= f) (b >>= f)
   Int i >>= _ = Int i
   Bool b >>= _ = Bool b
+  String s >>= _ = String s
 
 deriveEq1 ''Expr
 deriveShow1 ''Expr

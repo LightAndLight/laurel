@@ -31,6 +31,7 @@ data Expr a
   | Record (Vector (Text, Expr a))
   | Int Int
   | Bool Bool
+  | String Text
   | Equals (Expr a) (Expr a)
   deriving (Functor, Foldable, Traversable)
 
@@ -52,6 +53,7 @@ instance Monad Expr where
   Record a >>= f = Record ((fmap . fmap) (>>= f) a)
   Int i >>= _ = Int i
   Bool b >>= _ = Bool b
+  String s >>= _ = String s
   Equals a b >>= f = Equals (a >>= f) (b >>= f)
 
 deriveEq1 ''Expr
@@ -89,5 +91,7 @@ typeOf varType expr =
       Type.Name "Int"
     Bool{} ->
       Type.Name "Bool"
+    String{} ->
+      Type.Name "String"
     Equals{} ->
       Type.Name "Bool"

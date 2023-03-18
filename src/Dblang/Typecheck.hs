@@ -9,9 +9,11 @@ module Dblang.Typecheck (
   checkExpr,
   unknown,
   zonk,
+  zonkExpr,
 ) where
 
 import Bound (fromScope, toScope)
+import Bound.Scope (transverseScope)
 import Bound.Var (unvar)
 import Control.Monad (when)
 import Control.Monad.Error.Class (MonadError, throwError)
@@ -25,6 +27,7 @@ import Data.Text (Text)
 import qualified Data.Vector as Vector
 import Dblang.Definition (Definition)
 import Dblang.Expr (Expr (..))
+import qualified Dblang.Expr as Expr
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
@@ -80,6 +83,40 @@ zonk ty =
       pure ty
     Type.RNil ->
       pure ty
+
+zonkExpr :: Expr a -> Typecheck (Expr a)
+zonkExpr expr =
+  case expr of
+    Expr.Var{} ->
+      pure expr
+    Expr.Name{} ->
+      pure expr
+    Expr.Int{} ->
+      pure expr
+    Expr.Bool{} ->
+      pure expr
+    Expr.String{} ->
+      pure expr
+    Expr.Lam name body ->
+      Expr.Lam name <$> transverseScope zonkExpr body
+    Expr.App ty a b ->
+      Expr.App <$> zonk ty <*> zonkExpr a <*> traverse zonkExpr b
+    Expr.Yield a ->
+      Expr.Yield <$> zonkExpr a
+    Expr.For name ty a b ->
+      Expr.For name <$> zonk ty <*> zonkExpr a <*> transverseScope zonkExpr b
+    Expr.Filter name ty condition body ->
+      Expr.Filter name <$> zonk ty <*> transverseScope zonkExpr condition <*> zonkExpr body
+    Expr.Where condition rest ->
+      Expr.Where <$> zonkExpr condition <*> zonkExpr rest
+    Expr.Dot ty a b ->
+      Expr.Dot <$> zonk ty <*> zonkExpr a <*> pure b
+    Expr.Splat a b ->
+      Expr.Splat <$> zonkExpr a <*> pure b
+    Expr.Record fields ->
+      Expr.Record <$> (traverse . traverse) zonkExpr fields
+    Expr.Equals a b ->
+      Expr.Equals <$> zonkExpr a <*> zonkExpr b
 
 unify :: Type -> Type -> Typecheck ()
 unify expected actual = do
@@ -277,3 +314,5 @@ checkExpr nameTypes varType expr expectedTy =
       Int i <$ unify expectedTy (Type.Name "Int")
     Syntax.Bool b ->
       Bool b <$ unify expectedTy (Type.Name "Bool")
+    Syntax.String s ->
+      String s <$ unify expectedTy (Type.Name "String")

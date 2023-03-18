@@ -1,16 +1,15 @@
-module Dblang.Run.Postgres (runRelation, Error (..)) where
+module Dblang.Run.Postgres (run, Error (..)) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Foldable (foldrM)
+import Data.Foldable (foldlM)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Data.Text.Lazy.Builder as Builder
-import Data.Vector (Vector)
 import Data.Void (absurd)
 import Dblang.Compile.Postgres (compileQuery)
 import qualified Dblang.Parse as Parse
@@ -19,6 +18,8 @@ import Dblang.Type (Type)
 import qualified Dblang.Type as Type
 import Dblang.Typecheck (checkExpr, runTypecheck)
 import qualified Dblang.Typecheck as Typecheck
+import Dblang.Value (Value (..))
+import qualified Dblang.Value as Value
 import Hasql.Connection (Connection)
 import Hasql.Decoders (Result, Row)
 import qualified Hasql.Decoders as Decode
@@ -29,23 +30,13 @@ import Hasql.Statement (Statement (..))
 import Streaming.Chars.Text (StreamText (..))
 import Text.Sage (ParseError, parse)
 
-newtype Multiset a = Multiset (Vector a)
-  deriving (Eq, Show)
-
-data Value
-  = Relation (Multiset Value)
-  | Record (HashMap Text Value)
-  | Int Int
-  | Bool Bool
-  deriving (Eq, Show)
-
 resultDecoder :: Type -> Result Value
 resultDecoder ty =
   case ty of
     Type.App (Type.Name "Relation") a ->
-      Relation . Multiset <$> Decode.rowVector (rowDecoder a)
+      Relation . Value.fromVector <$> Decode.rowVector (rowDecoder a)
     _ ->
-      error $ "resultDecoder: invalid type " <> show ty
+      Decode.singleRow (rowDecoder ty)
 
 rowDecoder :: Type -> Row Value
 rowDecoder ty =
@@ -53,29 +44,40 @@ rowDecoder ty =
     Type.App (Type.Name "Record") rows
       | (fields, Nothing) <- Type.matchRow rows ->
           Record
-            <$> foldrM
-              ( \(fieldName, fieldType) rest -> do
-                  value <- valueDecoder fieldType
-                  pure $ HashMap.insert fieldName value rest
+            <$> foldlM
+              ( \acc (fieldName, fieldType) -> do
+                  value <- Decode.column $ valueDecoder fieldType
+                  pure $ HashMap.insert fieldName value acc
               )
               mempty
               fields
-    Type.Name "Int" ->
-      Int . fromIntegral <$> Decode.column (Decode.nonNullable Decode.int8)
-    Type.Name "Bool" ->
-      Bool <$> Decode.column (Decode.nonNullable Decode.bool)
     _ ->
-      error $ "rowDecoder: invalid type " <> show ty
+      Decode.column $ valueDecoder ty
 
-valueDecoder :: Type -> Row Value
+valueDecoder :: Type -> Decode.NullableOrNot Decode.Value Value
 valueDecoder ty =
-  case ty of
-    Type.Name "Int" ->
-      Int . fromIntegral <$> Decode.column (Decode.nonNullable Decode.int8)
-    Type.Name "Bool" ->
-      Bool <$> Decode.column (Decode.nonNullable Decode.bool)
-    _ ->
-      error $ "valueDecoder: invalid type " <> show ty
+  Decode.nonNullable $
+    case ty of
+      Type.Name "Int" ->
+        Int . fromIntegral <$> Decode.int8
+      Type.Name "Bool" ->
+        Bool <$> Decode.bool
+      Type.Name "String" ->
+        String <$> Decode.text
+      Type.App (Type.Name "Record") rows
+        | (fields, Nothing) <- Type.matchRow rows ->
+            Record
+              <$> Decode.composite
+                ( foldlM
+                    ( \acc (fieldName, fieldType) -> do
+                        value <- Decode.field $ valueDecoder fieldType
+                        pure $ HashMap.insert fieldName value acc
+                    )
+                    mempty
+                    fields
+                )
+      _ ->
+        error $ "valueDecoder: invalid type " <> show ty
 
 data Error
   = ParseError ParseError
@@ -83,8 +85,8 @@ data Error
   | QueryError QueryError
   deriving (Eq, Show)
 
-runRelation :: MonadIO m => Connection -> HashMap Text Type -> Text -> m (Either Error Value)
-runRelation conn nameTypes input =
+run :: MonadIO m => Connection -> HashMap Text Type -> Text -> m (Either Error Value)
+run conn nameTypes input =
   runExceptT $ do
     syntax <-
       either (throwError . ParseError) pure $
@@ -92,13 +94,14 @@ runRelation conn nameTypes input =
 
     (core, ty) <-
       either (throwError . TypeError) pure . runTypecheck $ do
-        ty <- Type.App (Type.Name "Relation") <$> Typecheck.unknown
+        ty <- Typecheck.unknown
         core <- checkExpr nameTypes absurd syntax ty
-        ty' <- Typecheck.zonk ty
-        pure (core, ty')
+        (,)
+          <$> Typecheck.zonkExpr core
+          <*> Typecheck.zonk ty
 
     let query = compileQuery absurd core
-    liftIO . putStrLn $ "info: " <> show query
+    liftIO . putStrLn $ "query: " <> show query
 
     queryResult <-
       liftIO $

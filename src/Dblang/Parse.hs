@@ -9,7 +9,7 @@ import qualified Data.Vector as Vector
 import Dblang.Syntax (Expr (..))
 import Streaming.Chars (Chars)
 import Text.Parser.Char (CharParsing, letter, lower)
-import Text.Parser.Token (braces, commaSep, integer, parens, symbol, symbolic)
+import Text.Parser.Token (braces, commaSep, integer, parens, stringLiteral, symbol, symbolic)
 import qualified Text.Parser.Token
 import qualified Text.Parser.Token.Highlight
 import Text.Sage (Parser)
@@ -67,6 +67,7 @@ exprAtom toVar =
     <|> Int . fromIntegral <$> integer
     <|> Bool True <$ keyword "true"
     <|> Bool False <$ keyword "false"
+    <|> String <$> stringLiteral
     <|> braces
       ( Record . Vector.fromList
           <$> commaSep

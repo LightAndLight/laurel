@@ -12,6 +12,7 @@ import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.Text.Lazy.Builder (Builder)
 import qualified Data.Text.Lazy.Builder as Builder
 import Data.Vector (Vector)
@@ -158,8 +159,8 @@ compileRelation varInfo expr =
       Yield
         { fieldNames =
             case Type.matchRecord $ Expr.typeOf ((.type_) . varInfo) value of
-              Nothing -> ["it"]
-              Just fields -> fmap fst fields
+              Just fields | not (null fields) -> fmap fst fields
+              _ -> ["it"]
         , expr = fmap varInfo value
         , wheres = []
         }
@@ -219,6 +220,8 @@ compileRelation varInfo expr =
       error "compileRelation: impossible Int"
     Expr.Bool{} ->
       error "compileRelation: impossible Bool"
+    Expr.String{} ->
+      error "compileRelation: impossible String"
 
 compileQuery :: (a -> VarInfo) -> Expr a -> Builder
 compileQuery varInfo expr =
@@ -240,9 +243,9 @@ compileQuery varInfo expr =
     Expr.App{} ->
       compileExpr varInfo expr
     Expr.Splat{} ->
-      "VALUES " <> parens (compileSelectList varInfo expr)
+      "VALUES " <> compileTuple varInfo expr
     Expr.Record{} ->
-      "VALUES " <> parens (compileSelectList varInfo expr)
+      "VALUES " <> compileTuple varInfo expr
     Expr.Dot{} ->
       "VALUES " <> parens (compileExpr varInfo expr)
     Expr.Equals{} ->
@@ -251,17 +254,21 @@ compileQuery varInfo expr =
       "VALUES " <> parens (compileExpr varInfo expr)
     Expr.Bool{} ->
       "VALUES " <> parens (compileExpr varInfo expr)
+    Expr.String{} ->
+      "VALUES " <> parens (compileExpr varInfo expr)
 
 compileSelectList :: (a -> VarInfo) -> Expr a -> Builder
 compileSelectList varInfo expr =
   case expr of
     Expr.Name name ->
       Builder.fromText name
-    Expr.Var var ->
-      let info = varInfo var
-       in case info.type_ of
+    Expr.Var var
+      | let info = varInfo var ->
+          case info.type_ of
             Type.App (Type.Name "Record") _ ->
               Builder.fromText info.name <> ".*"
+            Type.Unknown{} ->
+              error "variable has unknown type"
             _ ->
               Builder.fromText info.name
     Expr.Lam{} ->
@@ -295,6 +302,8 @@ compileSelectList varInfo expr =
     Expr.Int{} ->
       parens (compileExpr varInfo expr) <> " AS it"
     Expr.Bool{} ->
+      parens (compileExpr varInfo expr) <> " AS it"
+    Expr.String{} ->
       parens (compileExpr varInfo expr) <> " AS it"
 
 compileExpr :: (a -> VarInfo) -> Expr a -> Builder
@@ -344,6 +353,8 @@ compileExpr varInfo expr =
       Builder.fromString $ show i
     Expr.Bool b ->
       if b then "TRUE" else "FALSE"
+    Expr.String s ->
+      "'" <> foldMap (\c -> if c == '\'' then "''" else Builder.fromText (Text.singleton c)) (Text.unpack s) <> "'"
     Expr.Equals a b ->
       compileExpr varInfo a <> " = " <> compileExpr varInfo b
 
@@ -352,8 +363,12 @@ compileTuple varInfo expr =
   parens $
     case expr of
       Expr.Splat expr' names ->
-        commaSep (fmap (\name -> compileExpr varInfo expr' <> "." <> Builder.fromText name) names)
+        if null names
+          then "ROW()"
+          else commaSep (fmap (\name -> compileExpr varInfo expr' <> "." <> Builder.fromText name) names)
       Expr.Record fields ->
-        commaSep (fmap (\(_name, value) -> compileExpr varInfo value) fields)
+        if null fields
+          then "ROW()"
+          else commaSep (fmap (\(_name, value) -> compileExpr varInfo value) fields)
       _ ->
         compileExpr varInfo expr
