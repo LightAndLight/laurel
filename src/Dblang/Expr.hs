@@ -83,8 +83,8 @@ typeOf varType expr =
       error "TODO: typeOf: Dot"
     Splat{} ->
       error "TODO: typeOf: Splat"
-    Record{} ->
-      error "TODO: typeOf: Record"
+    Record fields ->
+      Type.App (Type.Name "Record") $ foldr (\(field, value) -> Type.RCons field (typeOf varType value)) Type.RNil fields
     Int{} ->
       Type.Name "Int"
     Bool{} ->

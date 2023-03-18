@@ -10,7 +10,7 @@ build-type:         Simple
 extra-doc-files:    CHANGELOG.md
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -Werror
 
 common extensions
     default-extensions:
@@ -27,6 +27,7 @@ library
         Dblang.Definition
         Dblang.Expr
         Dblang.Parse
+        Dblang.Run.Postgres
         Dblang.Syntax
         Dblang.Type
         Dblang.Typecheck
@@ -34,6 +35,7 @@ library
         base ^>=4.16.4.0,
         bound,
         deriving-compat,
+        hasql,
         mtl,
         unordered-containers,
         parsers,

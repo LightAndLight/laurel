@@ -1,7 +1,15 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Dblang.Typecheck (Typecheck, runTypecheck, Error (..), checkDefinition, checkExpr) where
+module Dblang.Typecheck (
+  Typecheck,
+  runTypecheck,
+  Error (..),
+  checkDefinition,
+  checkExpr,
+  unknown,
+  zonk,
+) where
 
 import Bound (fromScope, toScope)
 import Bound.Var (unvar)
@@ -53,6 +61,25 @@ getSolution n =
 setSolution :: Int -> Type -> Typecheck ()
 setSolution n ty =
   Typecheck . modify $ HashMap.insert n (Just ty)
+
+zonk :: Type -> Typecheck Type
+zonk ty =
+  case ty of
+    Type.Unknown n -> do
+      solution <- getSolution n
+      case solution of
+        Nothing ->
+          pure ty
+        Just ty' ->
+          zonk ty'
+    Type.App a b ->
+      Type.App <$> zonk a <*> zonk b
+    Type.RCons a b c ->
+      Type.RCons a <$> zonk b <*> zonk c
+    Type.Name{} ->
+      pure ty
+    Type.RNil ->
+      pure ty
 
 unify :: Type -> Type -> Typecheck ()
 unify expected actual = do

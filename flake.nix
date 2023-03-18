@@ -13,6 +13,9 @@
             haskell.packages."ghc${ghcVersion}".ghc
             cabal-install
             (haskell-language-server.override { supportedGhcVersions = [ ghcVersion ]; })
+            
+            # For the `hasql` Haskell package
+            postgresql
           ];
         };
       }

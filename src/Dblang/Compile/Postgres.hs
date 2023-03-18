@@ -51,8 +51,8 @@ queryParens f expr =
 data TableExpr = TableExpr {expr :: Expr VarInfo, name :: Text, freeVars :: HashSet Text}
 
 data Select
-  = Select {expr :: Builder, from :: TableExpr, froms :: [From], wheres :: [Expr VarInfo]}
-  | Yield {fieldNames :: Vector Text, expr :: Builder, wheres :: [Expr VarInfo]}
+  = Select {expr :: Expr VarInfo, from :: TableExpr, froms :: [From], wheres :: [Expr VarInfo]}
+  | Yield {fieldNames :: Vector Text, expr :: Expr VarInfo, wheres :: [Expr VarInfo]}
 
 data From
   = CrossJoin {lateral :: Bool, tableExpr :: TableExpr}
@@ -89,7 +89,7 @@ compileSelect select =
   case promoteCrossJoins select of
     Select{expr, from, froms, wheres} ->
       "SELECT "
-        <> expr
+        <> compileSelectList id expr
         <> " FROM "
         <> queryParens (compileQuery id) from.expr
         <> " AS "
@@ -100,14 +100,13 @@ compileSelect select =
           where_ : wheres' ->
             " WHERE " <> compileExpr id where_ <> foldMap ((" AND " <>) . compileExpr id) wheres'
     Yield{fieldNames, expr, wheres} ->
-      "SELECT "
-        <> commaSep (fmap Builder.fromText fieldNames)
-        <> " FROM "
+      "SELECT * FROM "
         <> parens
           ( "VALUES "
-              <> parens expr
+              <> compileTuple id expr
           )
         <> " AS _"
+        <> parens (commaSep (fmap Builder.fromText fieldNames))
         <> ( case wheres of
               [] ->
                 mempty
@@ -158,10 +157,10 @@ compileRelation varInfo expr =
     Expr.Yield value ->
       Yield
         { fieldNames =
-            case Type.matchRecord $ Expr.typeOf ((.type_) . varInfo) expr of
+            case Type.matchRecord $ Expr.typeOf ((.type_) . varInfo) value of
               Nothing -> ["it"]
               Just fields -> fmap fst fields
-        , expr = compileSelectList varInfo value
+        , expr = fmap varInfo value
         , wheres = []
         }
     Expr.For name type_ relation rest ->
@@ -186,7 +185,7 @@ compileRelation varInfo expr =
       -- condition : (a -> Bool)
       -- relation : Relation a
       Select
-        { expr = Builder.fromText name <> ".*"
+        { expr = undefined -- Builder.fromText name <> ".*"
         , from =
             TableExpr
               { expr = fmap varInfo relation
@@ -215,9 +214,11 @@ compileRelation varInfo expr =
     Expr.Record{} ->
       error "compileRelation: impossible Record"
     Expr.Equals{} ->
-      error "compileRelation: impossible Record"
+      error "compileRelation: impossible Equals"
     Expr.Int{} ->
-      error "compileRelation: impossible Record"
+      error "compileRelation: impossible Int"
+    Expr.Bool{} ->
+      error "compileRelation: impossible Bool"
 
 compileQuery :: (a -> VarInfo) -> Expr a -> Builder
 compileQuery varInfo expr =
@@ -238,16 +239,18 @@ compileQuery varInfo expr =
       compileSelect $ compileRelation varInfo expr
     Expr.App{} ->
       compileExpr varInfo expr
-    Expr.Dot{} ->
-      "VALUES " <> parens (compileSelectList varInfo expr)
     Expr.Splat{} ->
       "VALUES " <> parens (compileSelectList varInfo expr)
     Expr.Record{} ->
       "VALUES " <> parens (compileSelectList varInfo expr)
+    Expr.Dot{} ->
+      "VALUES " <> parens (compileExpr varInfo expr)
     Expr.Equals{} ->
-      "VALUES " <> parens (compileSelectList varInfo expr)
+      "VALUES " <> parens (compileExpr varInfo expr)
     Expr.Int{} ->
-      "VALUES " <> parens (compileSelectList varInfo expr)
+      "VALUES " <> parens (compileExpr varInfo expr)
+    Expr.Bool{} ->
+      "VALUES " <> parens (compileExpr varInfo expr)
 
 compileSelectList :: (a -> VarInfo) -> Expr a -> Builder
 compileSelectList varInfo expr =
@@ -290,6 +293,8 @@ compileSelectList varInfo expr =
     Expr.Equals{} ->
       parens (compileExpr varInfo expr) <> " AS it"
     Expr.Int{} ->
+      parens (compileExpr varInfo expr) <> " AS it"
+    Expr.Bool{} ->
       parens (compileExpr varInfo expr) <> " AS it"
 
 compileExpr :: (a -> VarInfo) -> Expr a -> Builder
@@ -337,5 +342,18 @@ compileExpr varInfo expr =
       "ROW" <> parens (commaSep (fmap (\(_name, value) -> compileExpr varInfo value) fields))
     Expr.Int i ->
       Builder.fromString $ show i
+    Expr.Bool b ->
+      if b then "TRUE" else "FALSE"
     Expr.Equals a b ->
       compileExpr varInfo a <> " = " <> compileExpr varInfo b
+
+compileTuple :: (a -> VarInfo) -> Expr a -> Builder
+compileTuple varInfo expr =
+  parens $
+    case expr of
+      Expr.Splat expr' names ->
+        commaSep (fmap (\name -> compileExpr varInfo expr' <> "." <> Builder.fromText name) names)
+      Expr.Record fields ->
+        commaSep (fmap (\(_name, value) -> compileExpr varInfo value) fields)
+      _ ->
+        compileExpr varInfo expr
