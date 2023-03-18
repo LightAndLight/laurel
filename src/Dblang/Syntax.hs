@@ -28,6 +28,8 @@ data Expr a
     Yield (Expr a)
   | Record (Vector (Text, Expr a))
   | Equals (Expr a) (Expr a)
+  | Int Int
+  | Bool Bool
   deriving (Functor, Foldable, Traversable)
 
 instance Applicative Expr where
@@ -46,6 +48,8 @@ instance Monad Expr where
   Yield a >>= f = Yield (a >>= f)
   Record fields >>= f = Record $ (fmap . fmap) (>>= f) fields
   Equals a b >>= f = Equals (a >>= f) (b >>= f)
+  Int i >>= _ = Int i
+  Bool b >>= _ = Bool b
 
 deriveEq1 ''Expr
 deriveShow1 ''Expr

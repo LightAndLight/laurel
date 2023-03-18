@@ -164,7 +164,7 @@ compileRelation varInfo expr =
         , expr = compileSelectList varInfo value
         , wheres = []
         }
-    Expr.From relation name type_ rest ->
+    Expr.For name type_ relation rest ->
       -- relation : Relation a
       let relation' =
             TableExpr
@@ -200,7 +200,7 @@ compileRelation varInfo expr =
                 (fromScope condition)
             ]
         }
-    Expr.When condition relation ->
+    Expr.Where condition relation ->
       -- condition : (a -> Bool)
       -- relation : Relation a
       case compileRelation varInfo relation of
@@ -230,11 +230,11 @@ compileQuery varInfo expr =
       error "TODO: compileExpr Lam"
     Expr.Yield{} ->
       compileSelect $ compileRelation varInfo expr
-    Expr.From{} ->
+    Expr.For{} ->
       compileSelect $ compileRelation varInfo expr
     Expr.Filter{} ->
       compileSelect $ compileRelation varInfo expr
-    Expr.When{} ->
+    Expr.Where{} ->
       compileSelect $ compileRelation varInfo expr
     Expr.App{} ->
       compileExpr varInfo expr
@@ -265,12 +265,12 @@ compileSelectList varInfo expr =
       error "TODO: compileSelectList Lam"
     Expr.Yield{} ->
       error "TODO: compileSelectList Yield"
-    Expr.From{} ->
-      error "TODO: compileSelectList From"
+    Expr.For{} ->
+      error "TODO: compileSelectList For"
     Expr.Filter{} ->
       error "TODO: compileSelectList Filter"
-    Expr.When{} ->
-      error "TODO: compileSelectList When"
+    Expr.Where{} ->
+      error "TODO: compileSelectList Where"
     Expr.Splat expr' names ->
       commaSep (fmap (\name -> compileExpr varInfo expr' <> "." <> Builder.fromText name <> " AS " <> Builder.fromText name) names)
     Expr.Record fields ->
@@ -303,12 +303,12 @@ compileExpr varInfo expr =
       error "TODO: compileExpr Lam"
     Expr.Yield{} ->
       error "TODO: compileExpr Yield"
-    Expr.From{} ->
-      error "TODO: compileExpr From"
+    Expr.For{} ->
+      error "TODO: compileExpr For"
     Expr.Filter{} ->
       error "TODO: compileExpr Filter"
-    Expr.When{} ->
-      error "TODO: compileExpr When"
+    Expr.Where{} ->
+      error "TODO: compileExpr Where"
     Expr.App _ function args ->
       case function of
         Expr.Name name ->

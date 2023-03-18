@@ -28,6 +28,7 @@ data Error
   = NotInScope {name :: Text}
   | TypeMismatch {expected :: Type, actual :: Type}
   | Occurs {meta :: Int, type_ :: Type}
+  deriving (Eq, Show)
 
 newtype Typecheck a = Typecheck (StateT (HashMap Int (Maybe Type)) (Either Error) a)
   deriving (Functor, Applicative, Monad, MonadError Error)
@@ -54,7 +55,19 @@ setSolution n ty =
   Typecheck . modify $ HashMap.insert n (Just ty)
 
 unify :: Type -> Type -> Typecheck ()
-unify expected actual =
+unify expected actual = do
+  expected' <- walk expected
+  actual' <- walk actual
+  unifyWalked expected' actual'
+ where
+  walk :: Type -> Typecheck Type
+  walk ty@(Type.Unknown n) = do
+    solution <- getSolution n
+    maybe (pure ty) walk solution
+  walk ty = pure ty
+
+unifyWalked :: Type -> Type -> Typecheck ()
+unifyWalked expected actual =
   case expected of
     Type.Unknown n ->
       case actual of
@@ -83,35 +96,35 @@ unify expected actual =
           throwError TypeMismatch{expected, actual}
     Type.RCons{} ->
       case actual of
-        Type.RCons{} ->
-          case (Type.matchRow expected, Type.matchRow actual) of
-            (Just (expectedFields, expectedRemainder), Just (actualFields, actualRemainder)) -> do
-              let (common, expectedNotInActualFields) =
-                    Vector.partitionWith
-                      ( \(field, expectedTy) -> case Vector.find (\(field', _) -> field == field') actualFields of
-                          Nothing -> Right (field, expectedTy)
-                          Just (_field, actualTy) -> Left (field, expectedTy, actualTy)
-                      )
-                      expectedFields
-                  actualNotInExpectedFields =
-                    Vector.filter
-                      ( \(field, _) -> case Vector.find (\(field', _, _) -> field == field') common of
-                          Nothing -> True
-                          Just _ -> False
-                      )
-                      actualFields
-              for_ common $ \(_field, expectedTy, actualTy) -> unify expectedTy actualTy
+        Type.RCons{} -> do
+          let (expectedFields, expectedRemainder) = Type.matchRow expected
+          let (actualFields, actualRemainder) = Type.matchRow actual
 
-              newActualRemainder <- unknown
-              unify
-                (Maybe.fromMaybe Type.RNil expectedRemainder)
-                (foldr (uncurry Type.RCons) newActualRemainder actualNotInExpectedFields)
+          let (common, expectedNotInActualFields) =
+                Vector.partitionWith
+                  ( \(field, expectedTy) -> case Vector.find (\(field', _) -> field == field') actualFields of
+                      Nothing -> Right (field, expectedTy)
+                      Just (_field, actualTy) -> Left (field, expectedTy, actualTy)
+                  )
+                  expectedFields
+              actualNotInExpectedFields =
+                Vector.filter
+                  ( \(field, _) -> case Vector.find (\(field', _, _) -> field == field') common of
+                      Nothing -> True
+                      Just _ -> False
+                  )
+                  actualFields
+          for_ common $ \(_field, expectedTy, actualTy) -> unify expectedTy actualTy
 
-              newExpectedRemainder <- unknown
-              unify
-                (foldr (uncurry Type.RCons) newExpectedRemainder expectedNotInActualFields)
-                (Maybe.fromMaybe Type.RNil actualRemainder)
-            _ -> undefined
+          newRemainder <- unknown
+
+          unify
+            (Maybe.fromMaybe Type.RNil expectedRemainder)
+            (foldr (uncurry Type.RCons) newRemainder actualNotInExpectedFields)
+
+          unify
+            (foldr (uncurry Type.RCons) newRemainder expectedNotInActualFields)
+            (Maybe.fromMaybe Type.RNil actualRemainder)
         Type.Unknown n ->
           solveRight expected n
         _ ->
@@ -208,30 +221,32 @@ checkExpr nameTypes varType expr expectedTy =
     Syntax.Record fields -> do
       expectedRow <- unknown
       unify expectedTy (Type.App (Type.Name "Record") expectedRow)
-      case Type.matchRow expectedRow of
-        Nothing -> undefined
-        Just (expectedFields, expectedRemainder) -> do
-          (fields', newExpectedRemainder) <-
-            flip runStateT (Maybe.fromMaybe Type.RNil expectedRemainder) $
-              traverse
-                ( \(field, value) -> do
-                    ty <- case Vector.find (\(field', _ty) -> field == field') expectedFields of
-                      Nothing -> do
-                        ty <- lift unknown
-                        newExpectedRemainder <- lift unknown
-                        currentExpectedRemainder <- get
-                        lift $ unify currentExpectedRemainder (Type.RCons field ty newExpectedRemainder)
-                        put newExpectedRemainder
-                        pure ty
-                      Just (_field, ty) ->
-                        pure ty
-                    lift $ (,) field <$> checkExpr nameTypes varType value ty
-                )
-                fields
-          unify newExpectedRemainder Type.RNil
-          pure $ Record fields'
+      let (expectedFields, expectedRemainder) = Type.matchRow expectedRow
+      (fields', newExpectedRemainder) <-
+        flip runStateT (Maybe.fromMaybe Type.RNil expectedRemainder) $
+          traverse
+            ( \(field, value) -> do
+                ty <- case Vector.find (\(field', _ty) -> field == field') expectedFields of
+                  Nothing -> do
+                    ty <- lift unknown
+                    newExpectedRemainder <- lift unknown
+                    currentExpectedRemainder <- get
+                    lift $ unify currentExpectedRemainder (Type.RCons field ty newExpectedRemainder)
+                    put newExpectedRemainder
+                    pure ty
+                  Just (_field, ty) ->
+                    pure ty
+                lift $ (,) field <$> checkExpr nameTypes varType value ty
+            )
+            fields
+      unify newExpectedRemainder Type.RNil
+      pure $ Record fields'
     Syntax.Equals a b -> do
       t <- unknown
       a' <- checkExpr nameTypes varType a t
       b' <- checkExpr nameTypes varType b t
       Equals a' b' <$ unify expectedTy (Type.Name "Bool")
+    Syntax.Int i ->
+      Int i <$ unify expectedTy (Type.Name "Int")
+    Syntax.Bool b ->
+      Bool b <$ unify expectedTy (Type.Name "Bool")

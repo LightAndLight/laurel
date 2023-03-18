@@ -38,14 +38,9 @@ matchRecord type_ =
       RNil -> Just []
       _ -> Nothing
 
-matchRow :: Type -> Maybe (Vector (Text, Type), Maybe Type)
-matchRow type_ =
-  case type_ of
-    RCons{} -> Just $ first Vector.fromList (go type_)
-    RNil{} -> Just $ first Vector.fromList (go type_)
-    _ -> Nothing
+matchRow :: Type -> (Vector (Text, Type), Maybe Type)
+matchRow = first Vector.fromList . go
  where
-  go :: Type -> ([(Text, Type)], Maybe Type)
   go fields =
     case fields of
       RCons name ty rest -> first ((name, ty) :) (go rest)

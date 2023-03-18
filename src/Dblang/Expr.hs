@@ -30,6 +30,7 @@ data Expr a
     Splat (Expr a) (Vector Text)
   | Record (Vector (Text, Expr a))
   | Int Int
+  | Bool Bool
   | Equals (Expr a) (Expr a)
   deriving (Functor, Foldable, Traversable)
 
@@ -50,6 +51,7 @@ instance Monad Expr where
   Splat a b >>= f = Splat (a >>= f) b
   Record a >>= f = Record ((fmap . fmap) (>>= f) a)
   Int i >>= _ = Int i
+  Bool b >>= _ = Bool b
   Equals a b >>= f = Equals (a >>= f) (b >>= f)
 
 deriveEq1 ''Expr
@@ -85,5 +87,7 @@ typeOf varType expr =
       error "TODO: typeOf: Record"
     Int{} ->
       Type.Name "Int"
+    Bool{} ->
+      Type.Name "Bool"
     Equals{} ->
       Type.Name "Bool"

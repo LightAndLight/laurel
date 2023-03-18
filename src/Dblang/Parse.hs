@@ -9,7 +9,7 @@ import qualified Data.Vector as Vector
 import Dblang.Syntax (Expr (..))
 import Streaming.Chars (Chars)
 import Text.Parser.Char (CharParsing, letter, lower)
-import Text.Parser.Token (braces, commaSep, parens, symbol, symbolic)
+import Text.Parser.Token (braces, commaSep, integer, parens, symbol, symbolic)
 import qualified Text.Parser.Token
 import qualified Text.Parser.Token.Highlight
 import Text.Sage (Parser)
@@ -20,7 +20,7 @@ idStyle =
     { _styleName = "identifier"
     , _styleStart = lower
     , _styleLetter = letter
-    , _styleReserved = ["for", "where", "in", "yield"]
+    , _styleReserved = ["for", "where", "in", "yield", "true", "false"]
     , _styleHighlight = Text.Parser.Token.Highlight.Identifier
     , _styleReservedHighlight = Text.Parser.Token.Highlight.ReservedIdentifier
     }
@@ -64,6 +64,9 @@ exprDot toVar = foldl Dot <$> exprAtom toVar <*> many (symbolic '.' *> ident)
 exprAtom :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprAtom toVar =
   toVar <$> ident
+    <|> Int . fromIntegral <$> integer
+    <|> Bool True <$ keyword "true"
+    <|> Bool False <$ keyword "false"
     <|> braces
       ( Record . Vector.fromList
           <$> commaSep
