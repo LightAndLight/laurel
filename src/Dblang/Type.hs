@@ -1,6 +1,8 @@
-module Dblang.Type (Type (..), arrow, matchArrow, record, matchRecord, matchRow) where
+module Dblang.Type (Type (..), arrow, matchArrow, record, matchRecord, matchRow, replaceDefinitions) where
 
 import Data.Bifunctor (first)
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
@@ -46,3 +48,17 @@ matchRow = first Vector.fromList . go
       RCons name ty rest -> first ((name, ty) :) (go rest)
       RNil -> ([], Nothing)
       ty -> ([], Just ty)
+
+replaceDefinitions :: HashMap Text Type -> Type -> Type
+replaceDefinitions typeDefinitions type_ =
+  case type_ of
+    Name typeName ->
+      maybe type_ (replaceDefinitions typeDefinitions) (HashMap.lookup typeName typeDefinitions)
+    App a b ->
+      App (replaceDefinitions typeDefinitions a) (replaceDefinitions typeDefinitions b)
+    RCons a b c ->
+      RCons a (replaceDefinitions typeDefinitions b) (replaceDefinitions typeDefinitions c)
+    RNil ->
+      type_
+    Unknown{} ->
+      type_

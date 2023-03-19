@@ -3,13 +3,18 @@ module Test.Dblang.Compile.Postgres (spec) where
 import Bound (Var (..), toScope)
 import Data.Foldable (for_)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Data.Text.Lazy.Builder as Builder
 import Data.Void (Void, absurd)
-import Dblang.Compile.Postgres (compileQuery)
+import Dblang.Compile.Postgres (compileDefinition, compileQuery)
 import Dblang.Expr (Expr (..))
+import qualified Dblang.Parse as Parse
 import qualified Dblang.Type as Type
+import qualified Dblang.Typecheck as Typecheck
+import Streaming.Chars.Text (StreamText (..))
 import Test.Hspec (Spec, describe, it, shouldBe)
+import Text.Sage (parse)
 
 spec :: Spec
 spec = do
@@ -74,3 +79,85 @@ spec = do
       for_ testCases $ \(label, input, expected) ->
         it ("compiles \"" <> label <> "\"") $ do
           Text.Lazy.toStrict (Builder.toLazyText $ compileQuery absurd input) `shouldBe` expected
+
+    describe "compileDefinition" $ do
+      let
+        testCases :: [(Text, Text)]
+        testCases =
+          [
+            ( "table people { type Id = Int, id : Id, name : String, age : Int }"
+            , Text.intercalate
+                "\n"
+                [ "CREATE TABLE people ("
+                , "id INT NOT NULL,"
+                , "name TEXT NOT NULL,"
+                , "age INT NOT NULL"
+                , ")"
+                ]
+            )
+          ,
+            ( "table people { type Id = Int, id : Id, name : String, age : Int [Default(0)] }"
+            , Text.intercalate
+                "\n"
+                [ "CREATE TABLE people ("
+                , "id INT NOT NULL,"
+                , "name TEXT NOT NULL,"
+                , "age INT NOT NULL DEFAULT 0"
+                , ")"
+                ]
+            )
+          ,
+            ( "table people { type Id = Int, id : Id [Key], name : String, age : Int [Default(0)] }"
+            , Text.intercalate
+                "\n"
+                [ "CREATE TABLE people ("
+                , "id INT NOT NULL,"
+                , "name TEXT NOT NULL,"
+                , "age INT NOT NULL DEFAULT 0,"
+                , "UNIQUE (id)"
+                , ")"
+                ]
+            )
+          ,
+            ( "table people { type Id = Int, id : Id [Key], name : String, age : Int [Default(0)], Key(name, age) }"
+            , Text.intercalate
+                "\n"
+                [ "CREATE TABLE people ("
+                , "id INT NOT NULL,"
+                , "name TEXT NOT NULL,"
+                , "age INT NOT NULL DEFAULT 0,"
+                , "UNIQUE (id),"
+                , "UNIQUE (name, age)"
+                , ")"
+                ]
+            )
+          ,
+            ( "table people { type Id = Int, id : Id [PrimaryKey], name : String, age : Int [Default(0)], Key(name, age) }"
+            , Text.intercalate
+                "\n"
+                [ "CREATE TABLE people ("
+                , "id INT NOT NULL,"
+                , "name TEXT NOT NULL,"
+                , "age INT NOT NULL DEFAULT 0,"
+                , "PRIMARY KEY (id),"
+                , "UNIQUE (name, age)"
+                , ")"
+                ]
+            )
+          ]
+      for_ testCases $ \(input, expected) ->
+        it ("compiles " <> show input) $ do
+          syntax <- case parse Parse.definition (StreamText input) of
+            Left err ->
+              error $ show err
+            Right syntax ->
+              pure syntax
+
+          definition <-
+            case Typecheck.runTypecheck (Typecheck.checkDefinition syntax) of
+              Left err ->
+                error $ show err
+              Right definition ->
+                pure definition
+
+          Text.Lazy.toStrict (Builder.toLazyText $ compileDefinition definition) `shouldBe` expected

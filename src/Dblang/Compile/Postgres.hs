@@ -5,7 +5,9 @@ module Dblang.Compile.Postgres (compileDefinition, compileQuery) where
 import Bound (fromScope)
 import Bound.Var (unvar)
 import Data.Bifunctor (first)
-import Data.Foldable (foldr')
+import Data.Foldable (foldl', foldr')
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import qualified Data.List as List
@@ -17,7 +19,8 @@ import Data.Text.Lazy.Builder (Builder)
 import qualified Data.Text.Lazy.Builder as Builder
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
-import Dblang.Definition (Definition)
+import Data.Void (Void, absurd)
+import Dblang.Definition (Constraint (..), Definition (..))
 import Dblang.Expr (Expr)
 import qualified Dblang.Expr as Expr
 import Dblang.Type (Type)
@@ -30,14 +33,77 @@ data VarOrigin
 data VarInfo = VarInfo {name :: Text, type_ :: Type, origin :: VarOrigin}
 
 compileDefinition :: Definition -> Builder
-compileDefinition = error "TODO: compileDefinition"
+compileDefinition definition =
+  case definition of
+    Table{name, types, inFields = _, outFields, constraints} ->
+      let (defaults, constraints') = Vector.mapMaybeM compileConstraint constraints
+       in "CREATE TABLE "
+            <> Builder.fromText name
+            <> " ("
+            <> sepByList
+              ( ("\n" <>)
+                  <$> foldr
+                    ( (:)
+                        . uncurry
+                          ( compileField
+                              (foldl' (\acc (typeName, typeValue) -> HashMap.insert typeName typeValue acc) mempty types)
+                              defaults
+                          )
+                    )
+                    (Vector.toList constraints')
+                    outFields
+              )
+              ","
+            <> "\n)"
+ where
+  compileConstraint :: Constraint -> (HashMap Text (Expr Void), Maybe Builder)
+  compileConstraint constraint =
+    case constraint of
+      Default name value -> (HashMap.singleton name value, Nothing)
+      Key fields -> (mempty, Just $ "UNIQUE " <> parens (commaSep $ Builder.fromText <$> fields))
+      PrimaryKey fields -> (mempty, Just $ "PRIMARY KEY " <> parens (commaSep $ Builder.fromText <$> fields))
 
-commaSep :: Vector Builder -> Builder
-commaSep items =
+  compileField :: HashMap Text Type -> HashMap Text (Expr Void) -> Text -> Type -> Builder
+  compileField typeDefinitions defaults name type_ =
+    Builder.fromText name
+      <> " "
+      <> compileType (Type.replaceDefinitions typeDefinitions type_)
+      <> " NOT NULL"
+      <> foldMap ((" DEFAULT " <>) . compileExpr absurd) (HashMap.lookup name defaults)
+
+  compileType :: Type -> Builder
+  compileType type_ =
+    case type_ of
+      Type.Name name ->
+        case name of
+          "Int" -> "INT"
+          "Bool" -> "BOOL"
+          "String" -> "TEXT"
+          _ ->
+            error $ "compileType: invalid type " <> show type_
+      Type.App (Type.Name "Record") _rows ->
+        error "TODO: compileType: Record"
+      Type.App (Type.Name "Relation") a ->
+        compileType a <> "[]"
+      _ ->
+        error $ "compileType: invalid type " <> show type_
+
+sepBy :: Vector Builder -> Builder -> Builder
+sepBy items sep =
   case Vector.uncons items of
     Nothing -> mempty
     Just (item, items') ->
-      item <> foldMap (", " <>) items'
+      item <> foldMap (sep <>) items'
+
+sepByList :: [Builder] -> Builder -> Builder
+sepByList items sep =
+  case items of
+    [] -> mempty
+    item : items' ->
+      item <> foldMap (sep <>) items'
+
+commaSep :: Vector Builder -> Builder
+commaSep items = items `sepBy` ", "
 
 parens :: Builder -> Builder
 parens x = "(" <> x <> ")"

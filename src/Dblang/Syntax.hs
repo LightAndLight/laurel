@@ -2,13 +2,20 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Dblang.Syntax (Expr (..)) where
+module Dblang.Syntax (
+  Definition (..),
+  TableItem (..),
+  Constraint (..),
+  Expr (..),
+) where
 
 import Bound (Scope, (>>>=))
 import qualified Control.Monad
 import Data.Eq.Deriving (deriveEq1)
 import Data.Text (Text)
 import Data.Vector (Vector)
+import Data.Void (Void)
+import Dblang.Type (Type)
 import Text.Show.Deriving (deriveShow1)
 
 data Expr a
@@ -58,3 +65,18 @@ deriveShow1 ''Expr
 
 deriving instance Show a => Show (Expr a)
 deriving instance Eq a => Eq (Expr a)
+
+data Definition = Table {name :: Text, items :: Vector TableItem}
+  deriving (Eq, Show)
+
+data TableItem
+  = -- | `type X = Y`
+    Type {name :: Text, value :: Type}
+  | -- | `x : Y [constraints]`
+    Field {name :: Text, type_ :: Type, constraints :: Vector Constraint}
+  | -- | `Name(arg_1, arg_2, ..., arg_n)`
+    Constraint Constraint
+  deriving (Eq, Show)
+
+data Constraint = MkConstraint {name :: Text, arguments :: Vector (Expr Void)}
+  deriving (Eq, Show)

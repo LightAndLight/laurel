@@ -36,6 +36,7 @@ library
         base ^>=4.16.4.0,
         bound,
         deriving-compat,
+        dlist,
         hasql,
         mtl,
         unordered-containers,

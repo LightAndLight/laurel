@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Dblang.Typecheck (
   Typecheck,
@@ -19,26 +20,32 @@ import Control.Monad (when)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.State.Strict (StateT, evalStateT, get, gets, modify, put, runStateT)
 import Control.Monad.Trans (lift)
-import Data.Foldable (for_)
+import Control.Monad.Writer.Strict (runWriterT, tell)
+import Data.DList (DList)
+import qualified Data.DList as DList
+import Data.Foldable (foldl', for_)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Maybe as Maybe
+import Data.Monoid (Any (..))
 import Data.Text (Text)
+import Data.Vector (Vector)
 import qualified Data.Vector as Vector
-import Dblang.Definition (Definition)
+import Data.Void (Void, absurd)
+import Dblang.Definition (Constraint (..), Definition (..))
 import Dblang.Expr (Expr (..))
 import qualified Dblang.Expr as Expr
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
 
-checkDefinition :: Definition -> m ()
-checkDefinition = error "TODO: checkDefinition"
-
 data Error
   = NotInScope {name :: Text}
   | TypeMismatch {expected :: Type, actual :: Type}
   | Occurs {meta :: Int, type_ :: Type}
+  | UnknownConstraint {name :: Text}
+  | NotAField {expr :: Syntax.Expr Void, table :: Text}
+  | IncorrectConstraintArguments {expectedArguments :: Int, actualArguments :: [Syntax.Expr Void]}
   deriving (Eq, Show)
 
 newtype Typecheck a = Typecheck (StateT (HashMap Int (Maybe Type)) (Either Error) a)
@@ -230,6 +237,151 @@ unifyWalked expected actual =
         setSolution n ty
       Just ty' ->
         unify ty ty'
+
+checkDefinition :: Syntax.Definition -> Typecheck Definition
+checkDefinition definition =
+  case definition of
+    Syntax.Table{name, items} -> do
+      (types, inFields, outFields, constraints) <- checkTableItems name items
+      pure Table{name, types, inFields, outFields, constraints}
+
+checkTableItems ::
+  Text ->
+  Vector Syntax.TableItem ->
+  Typecheck (Vector (Text, Type), Vector (Text, Type), Vector (Text, Type), Vector Constraint)
+checkTableItems table items_ = do
+  ((), (types, _fields, inFields, outFields, constraints)) <- flip runStateT (mempty, mempty, mempty, mempty, mempty) $ go items_
+  pure
+    ( Vector.fromList $ DList.toList types
+    , Vector.fromList $ DList.toList inFields
+    , Vector.fromList $ DList.toList outFields
+    , Vector.fromList $ DList.toList constraints
+    )
+ where
+  go ::
+    Vector Syntax.TableItem ->
+    StateT
+      (DList (Text, Type), HashMap Text Type, DList (Text, Type), DList (Text, Type), DList Constraint)
+      Typecheck
+      ()
+  go items =
+    case Vector.uncons items of
+      Nothing ->
+        pure ()
+      Just (item, items') ->
+        case item of
+          Syntax.Type{name, value} -> do
+            modify $ \(types, fields, inFields, outFields, constraints) ->
+              ( types `DList.snoc` (name, value)
+              , fields
+              , inFields
+              , outFields
+              , constraints
+              )
+            go items'
+          Syntax.Field{name, type_, constraints = fieldConstraints} -> do
+            modify $ \(types, fields, inFields, outFields, constraints) ->
+              ( types
+              , HashMap.insert name type_ fields
+              , inFields
+              , outFields
+              , constraints
+              )
+
+            (constraints', Any hasDefault) <- do
+              (typeDefinitions, fields) <- gets $ \(types, fields, _inFields, _outFields, _constraints) ->
+                ( foldl' (\acc (typeName, typeValue) -> HashMap.insert typeName typeValue acc) mempty types
+                , fields
+                )
+              runWriterT $
+                traverse
+                  ( \constraint -> do
+                      constraint' <-
+                        lift . lift $
+                          checkConstraint
+                            table
+                            typeDefinitions
+                            fields
+                            constraint.name
+                            (Syntax.Name name : Vector.toList constraint.arguments)
+
+                      case constraint' of
+                        Default{} -> tell $ Any True
+                        _ -> pure ()
+
+                      pure constraint'
+                  )
+                  (Vector.toList fieldConstraints)
+
+            modify $ \(types, fields, inFields, outFields, constraints) ->
+              ( types
+              , fields
+              , inFields `DList.snoc` (name, if hasDefault then Type.App (Type.Name "Optional") type_ else type_)
+              , outFields `DList.snoc` (name, type_)
+              , constraints <> DList.fromList constraints'
+              )
+
+            go items'
+          Syntax.Constraint constraint -> do
+            constraint' <- do
+              (typeDefinitions, fields) <- gets $ \(types, fields, _inFields, _outFields, _constraints) ->
+                ( foldl' (\acc (name, value) -> HashMap.insert name value acc) mempty types
+                , fields
+                )
+              lift $ checkConstraint table typeDefinitions fields constraint.name (Vector.toList constraint.arguments)
+            modify $ \(types, fields, inFields, outFields, constraints) ->
+              ( types
+              , fields
+              , inFields
+              , outFields
+              , constraints `DList.snoc` constraint'
+              )
+            go items'
+
+checkConstraint ::
+  Text ->
+  HashMap Text Type ->
+  HashMap Text Type ->
+  Text ->
+  [Syntax.Expr Void] ->
+  Typecheck Constraint
+checkConstraint table typeDefinitions fields name arguments =
+  case name of
+    "Default" ->
+      case arguments of
+        [expr, value] ->
+          case expr of
+            Syntax.Name fieldName
+              | Just type_ <- HashMap.lookup fieldName fields -> do
+                  value' <- checkExpr mempty absurd value (Type.replaceDefinitions typeDefinitions type_)
+                  pure $ Default fieldName value'
+            _ -> throwError NotAField{expr, table}
+        _ -> throwError IncorrectConstraintArguments{expectedArguments = 2, actualArguments = arguments}
+    "Key" -> do
+      arguments' <-
+        traverse
+          ( \argument ->
+              case argument of
+                Syntax.Name fieldName ->
+                  pure fieldName
+                _ ->
+                  throwError NotAField{expr = argument, table}
+          )
+          arguments
+      pure . Key $ Vector.fromList arguments'
+    "PrimaryKey" -> do
+      arguments' <-
+        traverse
+          ( \argument ->
+              case argument of
+                Syntax.Name fieldName ->
+                  pure fieldName
+                _ ->
+                  throwError NotAField{expr = argument, table}
+          )
+          arguments
+      pure . PrimaryKey $ Vector.fromList arguments'
+    _ -> throwError UnknownConstraint{name}
 
 checkExpr :: HashMap Text Type -> (a -> Type) -> Syntax.Expr a -> Type -> Typecheck (Expr a)
 checkExpr nameTypes varType expr expectedTy =

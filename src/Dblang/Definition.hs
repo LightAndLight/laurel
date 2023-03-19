@@ -1,4 +1,4 @@
-module Dblang.Definition (Definition (..), Item (..)) where
+module Dblang.Definition (Definition (..), Constraint (..)) where
 
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -6,9 +6,17 @@ import Data.Void (Void)
 import Dblang.Expr (Expr)
 import Dblang.Type (Type)
 
-data Definition = Table {name :: Text, items :: Vector Item}
+data Definition = Table
+  { name :: Text
+  , types :: Vector (Text, Type)
+  , inFields :: Vector (Text, Type)
+  , outFields :: Vector (Text, Type)
+  , constraints :: Vector Constraint
+  }
+  deriving (Eq, Show)
 
-data Item
-  = Field {name :: Text, type_ :: Type}
-  | Constraint {name :: Text, arguments :: Vector (Expr Void)}
+data Constraint
+  = Default {field :: Text, value :: Expr Void}
+  | Key {values :: Vector Text}
+  | PrimaryKey {values :: Vector Text}
   deriving (Eq, Show)
