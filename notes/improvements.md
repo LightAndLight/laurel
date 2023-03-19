@@ -65,3 +65,35 @@ around.
 
   * `when true a = a`
   * `x == x = true`
+
+* Compile one level of `Optional` to a `NULL`-able column, and subsequent levels to sum types:
+
+  ```
+  table a {
+    column : Optional Int
+  }
+  ```
+
+  ~>
+
+  ```
+  CREATE TABLE a (
+    column INT
+  )
+  ```
+
+  ```
+  table a {
+    column : Optional (Optional Int)
+  }
+  ```
+
+  ~>
+
+  ```
+  CREATE DOMAIN Optional_Int AS JSONB;
+  
+  CREATE TABLE a (
+    column Optional_Int;
+  )
+  ```
