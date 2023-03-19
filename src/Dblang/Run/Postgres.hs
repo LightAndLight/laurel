@@ -1,4 +1,4 @@
-module Dblang.Run.Postgres (run, Error (..)) where
+module Dblang.Run.Postgres (run, define, Error (..)) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
@@ -11,12 +11,12 @@ import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Data.Text.Lazy.Builder as Builder
 import Data.Void (absurd)
-import Dblang.Compile.Postgres (compileQuery)
+import Dblang.Compile.Postgres (compileDefinition, compileQuery)
 import qualified Dblang.Parse as Parse
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
-import Dblang.Typecheck (checkExpr, runTypecheck)
+import Dblang.Typecheck (checkDefinition, checkExpr, runTypecheck)
 import qualified Dblang.Typecheck as Typecheck
 import Dblang.Value (Value (..))
 import qualified Dblang.Value as Value
@@ -114,6 +114,32 @@ run conn nameTypes input =
                   (resultDecoder ty)
                   False
               )
+          )
+          conn
+
+    either (throwError . QueryError) pure queryResult
+
+define :: MonadIO m => Connection -> Text -> m (Either Error ())
+define conn input =
+  runExceptT $ do
+    syntax <-
+      either (throwError . ParseError) pure $
+        parse Parse.definition (StreamText input)
+
+    core <-
+      either (throwError . TypeError) pure . runTypecheck $
+        checkDefinition syntax
+
+    let query = compileDefinition core
+    liftIO . putStrLn $ "query: " <> show query
+
+    queryResult <-
+      liftIO $
+        Postgres.run
+          ( Postgres.sql
+              . Text.Encoding.encodeUtf8
+              . Text.Lazy.toStrict
+              $ Builder.toLazyText query
           )
           conn
 
