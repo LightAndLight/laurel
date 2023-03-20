@@ -65,6 +65,11 @@ around.
 
   * `when true a = a`
   * `x == x = true`
+  * ```
+    value in (for row in rows yield row.field)
+    =
+    notEmpty (for row in rows where row.field == value)
+    ```
 
 * Compile one level of `Optional` to a `NULL`-able column, and subsequent levels to sum types:
 
