@@ -115,11 +115,13 @@ queryParens f expr =
     Expr.App{} -> f expr
     _ -> parens $ f expr
 
-data TableExpr = TableExpr {expr :: Expr VarInfo, name :: Text, freeVars :: HashSet Text}
+data TableExpr = TableExpr {expr :: Expr VarInfo, alias :: Maybe Text, freeVars :: HashSet Text}
+
+data StarOr a = Star | NotStar a
 
 data Select
-  = Select {expr :: Expr VarInfo, from :: TableExpr, froms :: [From], wheres :: [Expr VarInfo]}
-  | Yield {fieldNames :: Vector Text, expr :: Expr VarInfo, wheres :: [Expr VarInfo]}
+  = Select {expr :: StarOr (Expr VarInfo), from :: TableExpr, froms :: [From], wheres :: [Expr VarInfo]}
+  | Yield {fieldNames :: Vector Text, value :: Expr VarInfo, wheres :: [Expr VarInfo]}
 
 data From
   = CrossJoin {lateral :: Bool, tableExpr :: TableExpr}
@@ -130,7 +132,7 @@ promoteCrossJoins :: Select -> Select
 promoteCrossJoins select =
   case select of
     Select{expr, from, froms, wheres} ->
-      let (froms', wheres') = go (HashSet.singleton from.name) froms wheres
+      let (froms', wheres') = go (foldMap HashSet.singleton from.alias) froms wheres
        in Select{expr, from, froms = froms', wheres = wheres'}
     Yield{} -> select
  where
@@ -139,13 +141,13 @@ promoteCrossJoins select =
   go scope (from : froms) wheres =
     case from of
       CrossJoin{lateral, tableExpr} ->
-        let newScope = HashSet.insert tableExpr.name scope
+        let newScope = maybe id HashSet.insert tableExpr.alias scope
             (matched, unmatched) = List.partition (all (\varInfo -> varInfo.name `HashSet.member` newScope)) wheres
          in case NonEmpty.nonEmpty matched of
               Nothing -> first (from :) (go newScope froms unmatched)
               Just on -> first (InnerJoin{lateral, tableExpr, on} :) (go newScope froms unmatched)
       InnerJoin{lateral, tableExpr, on} ->
-        let newScope = HashSet.insert tableExpr.name scope
+        let newScope = maybe id HashSet.insert tableExpr.alias scope
             (matched, unmatched) = List.partition (all (\varInfo -> varInfo.name `HashSet.member` newScope)) wheres
          in case NonEmpty.nonEmpty matched of
               Nothing -> first (from :) (go newScope froms unmatched)
@@ -156,21 +158,27 @@ compileSelect select =
   case promoteCrossJoins select of
     Select{expr, from, froms, wheres} ->
       "SELECT "
-        <> compileSelectList id expr
+        <> ( case expr of
+              Star -> "*"
+              NotStar expr' -> compileSelectList id expr'
+           )
         <> " FROM "
-        <> queryParens (compileQuery id) from.expr
-        <> " AS "
-        <> Builder.fromText from.name
+        <> compileFrom id from.expr
+        <> ( case from.alias of
+              Nothing -> mempty
+              Just alias ->
+                " AS " <> Builder.fromText alias
+           )
         <> foldMap ((" " <>) . printFrom) froms
         <> case wheres of
           [] -> mempty
           where_ : wheres' ->
             " WHERE " <> compileExpr id where_ <> foldMap ((" AND " <>) . compileExpr id) wheres'
-    Yield{fieldNames, expr, wheres} ->
+    Yield{fieldNames, value, wheres} ->
       "SELECT * FROM "
         <> parens
           ( "VALUES "
-              <> compileTuple id expr
+              <> compileTuple id value
           )
         <> " AS _"
         <> parens (commaSep (fmap Builder.fromText fieldNames))
@@ -189,15 +197,22 @@ printFrom from =
     CrossJoin{lateral, tableExpr} ->
       "CROSS JOIN "
         <> (if lateral then "LATERAL " else "")
-        <> queryParens (compileQuery id) tableExpr.expr
-        <> " AS "
-        <> Builder.fromText tableExpr.name
+        <> compileFrom id tableExpr.expr
+        <> ( case tableExpr.alias of
+              Nothing -> mempty
+              Just alias ->
+                " AS " <> Builder.fromText alias
+           )
     InnerJoin{lateral, tableExpr, on} ->
       "INNER JOIN "
         <> (if lateral then "LATERAL " else "")
-        <> queryParens (compileQuery id) tableExpr.expr
-        <> " AS "
-        <> Builder.fromText tableExpr.name
+        <> compileFrom id tableExpr.expr
+        <> ( case tableExpr.alias of
+              Nothing ->
+                mempty
+              Just alias ->
+                " AS " <> Builder.fromText alias
+           )
         <> " ON "
         <> compileExpr id (NonEmpty.head on)
         <> foldMap ((" AND " <>) . compileExpr id) (NonEmpty.tail on)
@@ -218,6 +233,8 @@ compileRelation varInfo expr =
     -- f x_1 x_2 ... x_n : Relation a
     Expr.App{} ->
       error "TODO: compileRelation App"
+    Expr.Dot _ (Expr.Name "tables") tableName ->
+      Select{expr = Star, from = TableExpr{expr = Expr.Name tableName, alias = Nothing, freeVars = [tableName]}, froms = [], wheres = []}
     -- r.x : Relation b
     Expr.Dot{} ->
       error "TODO: compileRelation Dot"
@@ -227,7 +244,7 @@ compileRelation varInfo expr =
             case Type.matchRecord $ Expr.typeOf ((.type_) . varInfo) value of
               Just fields | not (null fields) -> fmap fst fields
               _ -> ["it"]
-        , expr = fmap varInfo value
+        , value = fmap varInfo value
         , wheres = []
         }
     Expr.For name type_ relation rest ->
@@ -235,12 +252,12 @@ compileRelation varInfo expr =
       let relation' =
             TableExpr
               { expr = fmap varInfo relation
-              , name
+              , alias = Just name
               , freeVars = foldr' (HashSet.insert . (.name) . varInfo) mempty relation
               }
        in case compileRelation (unvar (\() -> VarInfo{name, type_, origin = TableVar}) varInfo) (fromScope rest) of
-            Yield{expr = yieldExpr, wheres} ->
-              Select{expr = yieldExpr, from = relation', froms = [], wheres}
+            Yield{value, wheres} ->
+              Select{expr = NotStar value, from = relation', froms = [], wheres}
             Select{expr = selectExpr, from, froms, wheres} ->
               Select
                 { expr = selectExpr
@@ -256,7 +273,7 @@ compileRelation varInfo expr =
         , from =
             TableExpr
               { expr = fmap varInfo relation
-              , name
+              , alias = Just name
               , freeVars = foldr' (HashSet.insert . (.name) . varInfo) mempty relation
               }
         , froms = []
@@ -270,8 +287,8 @@ compileRelation varInfo expr =
       -- condition : (a -> Bool)
       -- relation : Relation a
       case compileRelation varInfo relation of
-        Yield{fieldNames, expr = yieldExpr, wheres} ->
-          Yield{fieldNames, expr = yieldExpr, wheres = fmap varInfo condition : wheres}
+        Yield{fieldNames, value, wheres} ->
+          Yield{fieldNames, value, wheres = fmap varInfo condition : wheres}
         Select{expr = selectExpr, from, froms, wheres} ->
           Select{expr = selectExpr, from, froms, wheres = fmap varInfo condition : wheres}
     Expr.Lam{} ->
@@ -312,6 +329,8 @@ compileQuery varInfo expr =
       "VALUES " <> compileTuple varInfo expr
     Expr.Record{} ->
       "VALUES " <> compileTuple varInfo expr
+    Expr.Dot (Type.App (Type.Name "Relation") _) (Expr.Name "tables") _ ->
+      compileSelect $ compileRelation varInfo expr
     Expr.Dot{} ->
       "VALUES " <> parens (compileExpr varInfo expr)
     Expr.Equals{} ->
@@ -322,6 +341,14 @@ compileQuery varInfo expr =
       "VALUES " <> parens (compileExpr varInfo expr)
     Expr.String{} ->
       "VALUES " <> parens (compileExpr varInfo expr)
+
+compileFrom :: (a -> VarInfo) -> Expr a -> Builder
+compileFrom varInfo expr =
+  case expr of
+    Expr.Dot (Type.App (Type.Name "Relation") _) (Expr.Name "tables") tableName ->
+      Builder.fromText tableName
+    _ ->
+      queryParens (compileQuery varInfo) expr
 
 compileSelectList :: (a -> VarInfo) -> Expr a -> Builder
 compileSelectList varInfo expr =

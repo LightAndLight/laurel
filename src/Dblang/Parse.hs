@@ -12,7 +12,7 @@ import Dblang.Syntax (Constraint (..), Definition (..), Expr (..), TableItem (..
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
 import Streaming.Chars (Chars)
-import Text.Parser.Char (CharParsing, letter, lower, upper)
+import Text.Parser.Char (CharParsing, alphaNum, lower, upper)
 import Text.Parser.Token (braces, brackets, comma, commaSep, integer, parens, stringLiteral, symbol, symbolic)
 import qualified Text.Parser.Token
 import qualified Text.Parser.Token.Highlight
@@ -23,7 +23,7 @@ idStyle =
   Text.Parser.Token.IdentifierStyle
     { _styleName = "identifier"
     , _styleStart = lower
-    , _styleLetter = letter
+    , _styleLetter = alphaNum
     , _styleReserved = ["for", "where", "in", "yield", "true", "false", "table"]
     , _styleHighlight = Text.Parser.Token.Highlight.Identifier
     , _styleReservedHighlight = Text.Parser.Token.Highlight.ReservedIdentifier
@@ -34,7 +34,7 @@ constructorStyle =
   Text.Parser.Token.IdentifierStyle
     { _styleName = "constructor"
     , _styleStart = upper
-    , _styleLetter = letter
+    , _styleLetter = alphaNum
     , _styleReserved = []
     , _styleHighlight = Text.Parser.Token.Highlight.Constructor
     , _styleReservedHighlight = Text.Parser.Token.Highlight.ReservedConstructor

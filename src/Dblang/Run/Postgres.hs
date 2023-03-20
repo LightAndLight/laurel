@@ -1,17 +1,21 @@
-module Dblang.Run.Postgres (run, define, Error (..)) where
+{-# LANGUAGE LambdaCase #-}
+
+module Dblang.Run.Postgres (eval, define, Error (..)) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Foldable (foldlM)
-import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Data.Text.Lazy.Builder as Builder
+import Data.Vector (Vector)
+import qualified Data.Vector as Vector
 import Data.Void (absurd)
 import Dblang.Compile.Postgres (compileDefinition, compileQuery)
+import Dblang.Definition (Definition (..))
 import qualified Dblang.Parse as Parse
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
@@ -85,9 +89,22 @@ data Error
   | QueryError QueryError
   deriving (Eq, Show)
 
-run :: MonadIO m => Connection -> HashMap Text Type -> Text -> m (Either Error Value)
-run conn nameTypes input =
+eval ::
+  MonadIO m =>
+  Connection ->
+  Vector Definition ->
+  Text ->
+  m (Either Error Value)
+eval conn definitions input =
   runExceptT $ do
+    let tablesType =
+          Type.record $
+            Vector.mapMaybe
+              ( \case
+                  Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
+              )
+              definitions
+
     syntax <-
       either (throwError . ParseError) pure $
         parse (Parse.expr Syntax.Name) (StreamText input)
@@ -95,7 +112,7 @@ run conn nameTypes input =
     (core, ty) <-
       either (throwError . TypeError) pure . runTypecheck $ do
         ty <- Typecheck.unknown
-        core <- checkExpr nameTypes absurd syntax ty
+        core <- checkExpr (HashMap.singleton "tables" tablesType) absurd syntax ty
         (,)
           <$> Typecheck.zonkExpr core
           <*> Typecheck.zonk ty
@@ -119,7 +136,7 @@ run conn nameTypes input =
 
     either (throwError . QueryError) pure queryResult
 
-define :: MonadIO m => Connection -> Text -> m (Either Error ())
+define :: MonadIO m => Connection -> Text -> m (Either Error Definition)
 define conn input =
   runExceptT $ do
     syntax <-
@@ -144,3 +161,5 @@ define conn input =
           conn
 
     either (throwError . QueryError) pure queryResult
+
+    pure core
