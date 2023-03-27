@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
-module Dblang.Run.Postgres (eval, define, Error (..)) where
+module Dblang.Run.Postgres (eval, define, run, Error (..)) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
@@ -14,7 +15,8 @@ import qualified Data.Text.Lazy.Builder as Builder
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (absurd)
-import Dblang.Compile.Postgres (compileDefinition, compileQuery)
+import qualified Dblang.Command
+import Dblang.Compile.Postgres (compileCommand, compileDefinition, compileQuery)
 import Dblang.Definition (Definition)
 import qualified Dblang.Definition as Definition
 import Dblang.Definition.Table (Table (..))
@@ -165,3 +167,38 @@ define conn input =
     either (throwError . QueryError) pure queryResult
 
     pure core
+
+run ::
+  MonadIO m =>
+  Connection ->
+  Vector Definition ->
+  Text ->
+  m (Either Error Value)
+run conn definitions input =
+  runExceptT $ do
+    syntax <-
+      either (throwError . ParseError) pure $
+        parse Parse.command (StreamText input)
+
+    command <-
+      either (throwError . TypeError) pure . runTypecheck $
+        Typecheck.checkCommand definitions syntax
+
+    let query = compileCommand command
+    liftIO . putStrLn $ "query: " <> show query
+
+    queryResult <-
+      liftIO $
+        Postgres.run
+          ( Postgres.statement
+              ()
+              ( Statement
+                  (Text.Encoding.encodeUtf8 $ Text.Lazy.toStrict $ Builder.toLazyText query)
+                  noParams
+                  (resultDecoder command.type_)
+                  False
+              )
+          )
+          conn
+
+    either (throwError . QueryError) pure queryResult

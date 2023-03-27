@@ -141,4 +141,5 @@ constraint =
 
 command :: Chars s => Parser s Command
 command =
-  Insert <$ symbol ":insert" <*> ident <*> exprAtom Name
+  Eval <$ symbol ":eval" <*> expr Name
+    <|> Insert <$ symbol ":insert" <*> ident <*> exprAtom Name

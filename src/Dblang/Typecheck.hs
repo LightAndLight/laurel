@@ -486,11 +486,24 @@ lookupTable definitions name =
 
 checkCommand :: Vector Definition -> Syntax.Command -> Typecheck Command
 checkCommand definitions command =
-  case command of
-    Syntax.Insert{table = tableName, value} ->
-      case lookupTable definitions tableName of
-        Nothing ->
-          throwError NotATable{table = tableName}
-        Just table -> do
-          value' <- checkExpr mempty absurd value (Table.inputType table)
-          pure Insert{table, value = value'}
+  let tablesType =
+        Type.record $
+          Vector.mapMaybe
+            ( \case
+                Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
+            )
+            definitions
+      nameTypes = HashMap.singleton "tables" tablesType
+   in case command of
+        Syntax.Eval{value} -> do
+          ty <- unknown
+          value' <- zonkExpr =<< checkExpr nameTypes absurd value ty
+          type_ <- zonk ty
+          pure Eval{value = value', type_}
+        Syntax.Insert{table = tableName, value} ->
+          case lookupTable definitions tableName of
+            Nothing ->
+              throwError NotATable{table = tableName}
+            Just table -> do
+              value' <- zonkExpr =<< checkExpr mempty absurd value (Table.inputType table)
+              pure Insert{table, value = value', type_ = Type.Name "Unit"}

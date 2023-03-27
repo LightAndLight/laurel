@@ -473,6 +473,8 @@ compileTuple varInfo expr =
 compileCommand :: Command -> Builder
 compileCommand command =
   case command of
+    Eval{value} ->
+      compileQuery absurd value
     Insert{table, value} ->
       "INSERT INTO "
         <> Builder.fromText table.name

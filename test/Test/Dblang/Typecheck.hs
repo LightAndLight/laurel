@@ -1,5 +1,8 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+
 module Test.Dblang.Typecheck (spec) where
 
+import Bound (Var (..), toScope)
 import Data.Foldable (for_)
 import Data.Text (Text)
 import Data.Vector (Vector)
@@ -155,11 +158,33 @@ spec = do
           testCases =
             [
               ( ":insert people { id = 1, name = \"Harry Dresden\", age = 36 }"
-              , Right Insert{table = peopleTable, value = Record [("id", Int 1), ("name", String "Harry Dresden"), ("age", Int 36)]}
+              , Right
+                  Insert
+                    { table = peopleTable
+                    , value = Record [("id", Int 1), ("name", String "Harry Dresden"), ("age", Int 36)]
+                    , type_ = Type.Name "Unit"
+                    }
               )
             ,
               ( ":insert people { id = 1, name = \"Harry Dresden\", age = true }"
               , Left TypeMismatch{expected = Type.Name "Int", actual = Type.Name "Bool"}
+              )
+            ,
+              ( ":eval for person in tables.people where person.id == 1 yield person"
+              , Right
+                  Eval
+                    { value =
+                        For
+                          "person"
+                          (Type.record peopleTable.outFields)
+                          ( Dot
+                              (Type.App (Type.Name "Relation") (Type.record peopleTable.outFields))
+                              (Name "tables")
+                              "people"
+                          )
+                          (toScope $ Where (Equals (Dot (Type.Name "Int") (Var $ B ()) "id") (Int 1)) $ Yield $ Var $ B ())
+                    , type_ = Type.App (Type.Name "Relation") (Type.record peopleTable.outFields)
+                    }
               )
             ]
 
