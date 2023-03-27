@@ -45,7 +45,11 @@ table shapes {
 }
 ```
 
-## Alternative sketch: a `references` type
+## Alternative sketch 1: a `references` type
+
+Statically encode foreign key references using a special type.
+
+### Semantics 1: checked at construction time
 
 ```
 a : Type    lookupType(table, field) = a
@@ -84,9 +88,193 @@ table shapes {
 
 Disadvantage: less batch-checkable?
 
-Advantage: statically encode inter-table references.
+### Semantics 2: checked at insertion time
 
-### How to prevent dangling references?
+To regain batch checking, defer the foriegn key checks until the row is about to be inserted.
+
+Disadvantage: `fkey` and `unfkey` is boilerplate / inconvenient?
+
+## Alternative sketch 2: pattern-matching `references` constraint
+
+If a field has an enum type, then it can be given a foreign key constraint in pattern-matching
+style, specifying a foreign key constraint for each variant that needs one.
+
+```
+enum ShapeId {
+    Square(squares.Id),
+    Circle(circles.Id),
+    Triangle(triangles.Id)
+}
+
+table shapes {
+  type Id = Int,
+  id : Id [PrimaryKey],
+  value : ShapeId [
+    References(
+      Square(id) -> References(id, squares.id),
+      Circle(id) -> References(id, circles.id),
+      Triangle(id) -> References(id, triangles.id)
+    )
+  ]
+}
+```
+
+```
+table shapes {
+  type Id = Int,
+  id : Id [PrimaryKey],
+  value : ShapeId,
+  References(
+    value,
+    Square(id) -> References(id, squares.id),
+    Circle(id) -> References(id, circles.id),
+    Triangle(id) -> References(id, triangles.id)
+  )
+}
+```
+
+Or this could generalise to a `Match` constraint, which applies constraints conditional on the value
+of the field:
+
+
+```
+table shapes {
+  type Id = Int,
+  id : Id [PrimaryKey],
+  value : ShapeId,
+  Match(
+    value,
+    Square(id) -> References(id, squares.id),
+    Circle(id) -> References(id, circles.id),
+    Triangle(id) -> References(id, triangles.id)
+  )
+}
+```
+
+Some constraints don't make sense when they're conditionally applied, such as `Key` and
+`PrimaryKey`. Whether or not some fields form a key is independent of any values in a table.
+
+You could restrict the branches `Match` to only allow references to bound variables, which would
+disallow conditional keys on other fields:
+
+```
+table shapes {
+  type Id = Int,
+  id : Id,
+  value : ShapeId,
+  Match(
+    value,
+    Square(ignored) -> PrimaryKey(id), # error: `id` not in scope
+  )
+}
+```
+
+But there are still some key constraints that wouldn't be rejected:
+
+```
+table shapes {
+  value : ShapeId,
+  Match(
+    value,
+    Square(id) -> PrimaryKey(id),
+  )
+}
+```
+
+```
+table shapes {
+  value : ShapeId,
+  Match(
+    value,
+    Square(id) -> PrimaryKey(id),
+    Circle(id) -> PrimaryKey(id),
+    Triangle(id) -> PrimaryKey(id),
+  )
+}
+```
+
+```
+table shapes {
+  value : ShapeId,
+  Match(
+    value,
+    Square(id) -> PrimaryKey(id.value),
+    Circle(id) -> PrimaryKey(id.value),
+    Triangle(id) -> PrimaryKey(id.value),
+  )
+}
+```
+
+The first example *should* be rejected because it leaves the primary key partially undefined.
+
+The second example gives a fully defined primary key, but should also be rejected because each `id`
+is of a different type, so they aren't comparable. A key must correspond to a single type.
+
+The third example would be acceptable. It says that the value of the `id` field in the `ShapeId`
+enum is the primary key. It would mean that rows like `{ value = ShapeId.Square(squares.Id(1)) }`
+and `{ value = ShapeId.Triangle(triangles.Id(1)) }` can't both exist in the table at the same time.
+I don't know if this would be useful.
+
+It all gets pretty complicated, so I'd prefer the simple "matching `References`" if I had to
+implement it now.
+
+## Alternative sketch 3: constraints in type definitions
+
+What if you could add constraints to the fields of type definitions, such that those constraints get
+added to tables that contain said types?
+
+```
+enum ShapeId {
+    Square(squares.Id [References(squares.id)]),
+    Circle(circles.Id [References(circles.id)]),
+    Triangle(triangles.Id [References(triangles.id)])
+}
+
+table shapes {
+  type Id = Int,
+  id : Id [PrimaryKey],
+  value : ShapeId
+}
+```
+
+Does it get weird for key constraints?
+
+```
+enum ShapeId {
+    Square(squares.Id [Key]),
+    Circle(circles.Id [Key]),
+    Triangle(triangles.Id [Key])
+}
+```
+
+A key is a value that should uniquely identify a row. We can't define a key on a constuctor's
+argument because it's not able to identify rows that don't contain said constructor. Primary keys
+would be ruled out for the same reason. Defaults and foreign key references would work fine.
+
+## Alternative sketch 4: syntax for naming enum variants
+
+If there was an operator to "name" an enum's constructor, like `.` "names" a record's field, then we
+could locate a specific field as the target of a foreign key constraint. I wouldn't use `.` for this
+though, because I only use `.` for projection from products. 
+
+```
+enum ShapeId {
+    Square(squares.Id),
+    Circle(circles.Id),
+    Triangle(triangles.Id)
+}
+
+table shapes {
+  type Id = Int,
+  id : Id [PrimaryKey],
+  value : ShapeId,
+  References(value@Square.0, squares.id),
+  References(value@Circle.0, circles.id),
+  References(value@Triangle.0, triangles.id),
+}
+```
+
+## How to prevent dangling references?
 
 Before I remove a row `r` from `squares`, I first have to check that
 
