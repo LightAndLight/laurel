@@ -16,4 +16,5 @@ data Value
   | Int Int
   | Bool Bool
   | String Text
+  | Unit
   deriving (Eq, Show)

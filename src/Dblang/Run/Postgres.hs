@@ -15,7 +15,7 @@ import qualified Data.Text.Lazy.Builder as Builder
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (absurd)
-import qualified Dblang.Command
+import qualified Dblang.Command as Command
 import Dblang.Compile.Postgres (compileCommand, compileDefinition, compileQuery)
 import Dblang.Definition (Definition)
 import qualified Dblang.Definition as Definition
@@ -195,7 +195,7 @@ run conn definitions input =
               ( Statement
                   (Text.Encoding.encodeUtf8 $ Text.Lazy.toStrict $ Builder.toLazyText query)
                   noParams
-                  (resultDecoder command.type_)
+                  (maybe (Value.Unit <$ Decode.noResult) resultDecoder $ Command.result command)
                   False
               )
           )

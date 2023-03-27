@@ -506,4 +506,4 @@ checkCommand definitions command =
               throwError NotATable{table = tableName}
             Just table -> do
               value' <- zonkExpr =<< checkExpr mempty absurd value (Table.inputType table)
-              pure Insert{table, value = value', type_ = Type.Name "Unit"}
+              pure Insert{table, value = value'}

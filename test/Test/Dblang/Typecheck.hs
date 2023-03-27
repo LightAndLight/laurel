@@ -162,7 +162,6 @@ spec = do
                   Insert
                     { table = peopleTable
                     , value = Record [("id", Int 1), ("name", String "Harry Dresden"), ("age", Int 36)]
-                    , type_ = Type.Name "Unit"
                     }
               )
             ,
