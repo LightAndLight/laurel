@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module Dblang.Compile.Postgres (compileDefinition, compileQuery) where
+module Dblang.Compile.Postgres (compileDefinition, compileQuery, compileCommand) where
 
 import Bound (fromScope)
 import Bound.Var (unvar)
@@ -20,7 +20,11 @@ import qualified Data.Text.Lazy.Builder as Builder
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
-import Dblang.Definition (Constraint (..), Definition (..))
+import Dblang.Command (Command (..))
+import Dblang.Definition (Definition)
+import qualified Dblang.Definition as Definition
+import Dblang.Definition.Constraint (Constraint (..))
+import Dblang.Definition.Table (Table (..))
 import Dblang.Expr (Expr)
 import qualified Dblang.Expr as Expr
 import Dblang.Type (Type)
@@ -35,7 +39,7 @@ data VarInfo = VarInfo {name :: Text, type_ :: Type, origin :: VarOrigin}
 compileDefinition :: Definition -> Builder
 compileDefinition definition =
   case definition of
-    Table{name, types, inFields = _, outFields, constraints} ->
+    Definition.Table Table{name, types, inFields = _, outFields, constraints} ->
       let (defaults, constraints') = Vector.mapMaybeM compileConstraint constraints
        in "CREATE TABLE "
             <> Builder.fromText name
@@ -465,3 +469,13 @@ compileTuple varInfo expr =
           else commaSep (fmap (\(_name, value) -> compileExpr varInfo value) fields)
       _ ->
         compileExpr varInfo expr
+
+compileCommand :: Command -> Builder
+compileCommand command =
+  case command of
+    Insert{table, value} ->
+      "INSERT INTO "
+        <> Builder.fromText table.name
+        <> parens (commaSep $ fmap (Builder.fromText . fst) table.inFields)
+        <> " VALUES "
+        <> compileTuple absurd value

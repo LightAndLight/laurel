@@ -1,6 +1,10 @@
 {-# LANGUAGE TupleSections #-}
 
-module Dblang.Parse (definition, expr) where
+module Dblang.Parse (
+  definition,
+  expr,
+  command,
+) where
 
 import Bound (Var (..), toScope)
 import Control.Applicative (many, optional, (<|>))
@@ -8,7 +12,7 @@ import Data.Foldable (fold)
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Vector as Vector
-import Dblang.Syntax (Constraint (..), Definition (..), Expr (..), TableItem (..))
+import Dblang.Syntax (Command (..), Constraint (..), Definition (..), Expr (..), TableItem (..))
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
 import Streaming.Chars (Chars)
@@ -134,3 +138,7 @@ constraint =
   (\name -> MkConstraint name . Maybe.fromMaybe [])
     <$> constructor
     <*> optional (parens (Vector.fromList <$> commaSep (expr Name)))
+
+command :: Chars s => Parser s Command
+command =
+  Insert <$ symbol ":insert" <*> ident <*> exprAtom Name

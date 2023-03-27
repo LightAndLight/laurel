@@ -1,22 +1,6 @@
-module Dblang.Definition (Definition (..), Constraint (..)) where
+module Dblang.Definition (Definition (..)) where
 
-import Data.Text (Text)
-import Data.Vector (Vector)
-import Data.Void (Void)
-import Dblang.Expr (Expr)
-import Dblang.Type (Type)
+import Dblang.Definition.Table (Table)
 
-data Definition = Table
-  { name :: Text
-  , types :: Vector (Text, Type)
-  , inFields :: Vector (Text, Type)
-  , outFields :: Vector (Text, Type)
-  , constraints :: Vector Constraint
-  }
-  deriving (Eq, Show)
-
-data Constraint
-  = Default {field :: Text, value :: Expr Void}
-  | Key {values :: Vector Text}
-  | PrimaryKey {values :: Vector Text}
+data Definition = Table Table
   deriving (Eq, Show)

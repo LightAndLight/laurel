@@ -9,6 +9,7 @@ module Dblang.Typecheck (
   Error (..),
   checkDefinition,
   checkExpr,
+  checkCommand,
   unknown,
   zonk,
   zonkExpr,
@@ -33,7 +34,12 @@ import Data.Text (Text)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
-import Dblang.Definition (Constraint (..), Definition (..))
+import Dblang.Command (Command (..))
+import Dblang.Definition (Definition)
+import qualified Dblang.Definition as Definition
+import Dblang.Definition.Constraint (Constraint (..))
+import Dblang.Definition.Table (Table (..))
+import qualified Dblang.Definition.Table as Table
 import Dblang.Expr (Expr (..))
 import qualified Dblang.Expr as Expr
 import qualified Dblang.Syntax as Syntax
@@ -47,6 +53,7 @@ data Error
   | UnknownConstraint {name :: Text}
   | NotAField {expr :: Syntax.Expr Void, table :: Text}
   | IncorrectConstraintArguments {expectedArguments :: Int, actualArguments :: [Syntax.Expr Void]}
+  | NotATable {table :: Text}
   deriving (Eq, Show)
 
 newtype Typecheck a = Typecheck (StateT (HashMap Int (Maybe Type)) (Either Error) a)
@@ -244,7 +251,7 @@ checkDefinition definition =
   case definition of
     Syntax.Table{name, items} -> do
       (types, inFields, outFields, constraints) <- checkTableItems name items
-      pure Table{name, types, inFields, outFields, constraints}
+      pure $ Definition.Table Table{name, types, inFields, outFields, constraints}
 
 checkTableItems ::
   Text ->
@@ -469,3 +476,21 @@ checkExpr nameTypes varType expr expectedTy =
       Bool b <$ unify expectedTy (Type.Name "Bool")
     Syntax.String s ->
       String s <$ unify expectedTy (Type.Name "String")
+
+lookupTable :: Vector Definition -> Text -> Maybe Table
+lookupTable definitions name =
+  Vector.mapMaybe
+    (\(Definition.Table table) -> if table.name == name then Just table else Nothing)
+    definitions
+    Vector.!? 0
+
+checkCommand :: Vector Definition -> Syntax.Command -> Typecheck Command
+checkCommand definitions command =
+  case command of
+    Syntax.Insert{table = tableName, value} ->
+      case lookupTable definitions tableName of
+        Nothing ->
+          throwError NotATable{table = tableName}
+        Just table -> do
+          value' <- checkExpr mempty absurd value (Table.inputType table)
+          pure Insert{table, value = value'}

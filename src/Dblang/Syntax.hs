@@ -7,6 +7,7 @@ module Dblang.Syntax (
   TableItem (..),
   Constraint (..),
   Expr (..),
+  Command (..),
 ) where
 
 import Bound (Scope, (>>>=))
@@ -79,4 +80,7 @@ data TableItem
   deriving (Eq, Show)
 
 data Constraint = MkConstraint {name :: Text, arguments :: Vector (Expr Void)}
+  deriving (Eq, Show)
+
+data Command = Insert {table :: Text, value :: Expr Void}
   deriving (Eq, Show)

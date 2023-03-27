@@ -15,7 +15,9 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (absurd)
 import Dblang.Compile.Postgres (compileDefinition, compileQuery)
-import Dblang.Definition (Definition (..))
+import Dblang.Definition (Definition)
+import qualified Dblang.Definition as Definition
+import Dblang.Definition.Table (Table (..))
 import qualified Dblang.Parse as Parse
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
@@ -101,7 +103,7 @@ eval conn definitions input =
           Type.record $
             Vector.mapMaybe
               ( \case
-                  Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
+                  Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
               )
               definitions
 

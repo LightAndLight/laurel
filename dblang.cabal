@@ -23,8 +23,11 @@ common extensions
 library
     import:           warnings, extensions
     exposed-modules:
+        Dblang.Command
         Dblang.Compile.Postgres
         Dblang.Definition
+        Dblang.Definition.Constraint
+        Dblang.Definition.Table
         Dblang.Expr
         Dblang.Parse
         Dblang.Run.Postgres
@@ -73,4 +76,5 @@ test-suite dblang-test
         dblang,
         hspec,
         sage,
-        text
+        text,
+        vector

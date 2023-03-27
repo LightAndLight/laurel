@@ -6,8 +6,10 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Lazy as Text.Lazy
 import qualified Data.Text.Lazy.Builder as Builder
+import Data.Vector (Vector)
 import Data.Void (Void, absurd)
-import Dblang.Compile.Postgres (compileDefinition, compileQuery)
+import Dblang.Compile.Postgres (compileCommand, compileDefinition, compileQuery)
+import Dblang.Definition (Definition)
 import Dblang.Expr (Expr (..))
 import qualified Dblang.Parse as Parse
 import qualified Dblang.Type as Type
@@ -15,6 +17,20 @@ import qualified Dblang.Typecheck as Typecheck
 import Streaming.Chars.Text (StreamText (..))
 import Test.Hspec (Spec, describe, it, shouldBe)
 import Text.Sage (parse)
+
+parseAndCheckDefinition :: Monad m => Text -> m Definition
+parseAndCheckDefinition input = do
+  syntax <- case parse Parse.definition (StreamText input) of
+    Left err ->
+      error $ show err
+    Right syntax ->
+      pure syntax
+
+  case Typecheck.runTypecheck (Typecheck.checkDefinition syntax) of
+    Left err ->
+      error $ show err
+    Right definition ->
+      pure definition
 
 spec :: Spec
 spec = do
@@ -147,17 +163,38 @@ spec = do
           ]
       for_ testCases $ \(input, expected) ->
         it ("compiles " <> show input) $ do
-          syntax <- case parse Parse.definition (StreamText input) of
-            Left err ->
-              error $ show err
-            Right syntax ->
-              pure syntax
+          definition <- parseAndCheckDefinition input
+          Text.Lazy.toStrict (Builder.toLazyText $ compileDefinition definition) `shouldBe` expected
 
-          definition <-
-            case Typecheck.runTypecheck (Typecheck.checkDefinition syntax) of
+    describe "compileCommand" $ do
+      let peopleString = "table people { type Id = Int, id : Int [PrimaryKey], name : String, age : Int }"
+      people <- parseAndCheckDefinition peopleString
+
+      describe ("given " <> show peopleString) $ do
+        let
+          definitions :: Vector Definition
+          definitions = [people]
+
+          testCases :: [(Text, Text)]
+          testCases =
+            [
+              ( ":insert people { id = 1, name = \"Harry Dresden\", age = 36 }"
+              , "INSERT INTO people(id, name, age) VALUES (1, 'Harry Dresden', 36)"
+              )
+            ]
+        for_ testCases $ \(input, expected) ->
+          it ("compiles " <> show input) $ do
+            syntax <- case parse Parse.command (StreamText input) of
               Left err ->
                 error $ show err
-              Right definition ->
-                pure definition
+              Right syntax ->
+                pure syntax
 
-          Text.Lazy.toStrict (Builder.toLazyText $ compileDefinition definition) `shouldBe` expected
+            command <-
+              case Typecheck.runTypecheck (Typecheck.checkCommand definitions syntax) of
+                Left err ->
+                  error $ show err
+                Right command ->
+                  pure command
+
+            Text.Lazy.toStrict (Builder.toLazyText $ compileCommand command) `shouldBe` expected
