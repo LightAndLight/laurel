@@ -31,6 +31,7 @@ library
         Dblang.Expr
         Dblang.Parse
         Dblang.Run.Postgres
+        Dblang.Run.CSV
         Dblang.Syntax
         Dblang.Type
         Dblang.Typecheck
@@ -38,8 +39,11 @@ library
     build-depends:
         base ^>=4.16.4.0,
         bound,
+        bytestring,
+        cassava,
         deriving-compat,
         dlist,
+        filepath,
         hasql,
         mtl,
         unordered-containers,
