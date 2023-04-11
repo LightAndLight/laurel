@@ -269,24 +269,6 @@ compileRelation varInfo expr =
                 , froms = CrossJoin{lateral = name `isReferencedBy` from, tableExpr = from} : froms
                 , wheres
                 }
-    Expr.Filter name type_ condition relation ->
-      -- condition : (a -> Bool)
-      -- relation : Relation a
-      Select
-        { expr = undefined -- Builder.fromText name <> ".*"
-        , from =
-            TableExpr
-              { expr = fmap varInfo relation
-              , alias = Just name
-              , freeVars = foldr' (HashSet.insert . (.name) . varInfo) mempty relation
-              }
-        , froms = []
-        , wheres =
-            [ fmap
-                (unvar (\() -> VarInfo{name, type_, origin = TableVar}) varInfo)
-                (fromScope condition)
-            ]
-        }
     Expr.Where condition relation ->
       -- condition : (a -> Bool)
       -- relation : Relation a
@@ -322,8 +304,6 @@ compileQuery varInfo expr =
     Expr.Yield{} ->
       compileSelect $ compileRelation varInfo expr
     Expr.For{} ->
-      compileSelect $ compileRelation varInfo expr
-    Expr.Filter{} ->
       compileSelect $ compileRelation varInfo expr
     Expr.Where{} ->
       compileSelect $ compileRelation varInfo expr
@@ -374,8 +354,6 @@ compileSelectList varInfo expr =
       error "TODO: compileSelectList Yield"
     Expr.For{} ->
       error "TODO: compileSelectList For"
-    Expr.Filter{} ->
-      error "TODO: compileSelectList Filter"
     Expr.Where{} ->
       error "TODO: compileSelectList Where"
     Expr.Splat expr' names ->
@@ -416,8 +394,6 @@ compileExpr varInfo expr =
       error "TODO: compileExpr Yield"
     Expr.For{} ->
       error "TODO: compileExpr For"
-    Expr.Filter{} ->
-      error "TODO: compileExpr Filter"
     Expr.Where{} ->
       error "TODO: compileExpr Where"
     Expr.App _ function args ->

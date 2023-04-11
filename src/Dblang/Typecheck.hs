@@ -120,8 +120,6 @@ zonkExpr expr =
       Expr.Yield <$> zonkExpr a
     Expr.For name ty a b ->
       Expr.For name <$> zonk ty <*> zonkExpr a <*> transverseScope zonkExpr b
-    Expr.Filter name ty condition body ->
-      Expr.Filter name <$> zonk ty <*> transverseScope zonkExpr condition <*> zonkExpr body
     Expr.Where condition rest ->
       Expr.Where <$> zonkExpr condition <*> zonkExpr rest
     Expr.Dot ty a b ->

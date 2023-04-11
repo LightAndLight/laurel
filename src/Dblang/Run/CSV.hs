@@ -99,8 +99,6 @@ runExpr context varValue expr =
               mempty
               values'
         _ -> error $ "expected relation, got " <> show collection'
-    Filter _ _ predicate collection ->
-      error "TODO" predicate collection
     Where condition rest -> do
       condition' <- runExpr context varValue condition
       case condition' of

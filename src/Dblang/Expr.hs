@@ -22,7 +22,6 @@ data Expr a
   | Yield (Expr a)
   | -- | `for a in as rest`
     For Text Type (Expr a) (Scope () Expr a)
-  | Filter Text Type (Scope () Expr a) (Expr a)
   | Where (Expr a) (Expr a)
   | -- | `r.x`
     Dot Type (Expr a) Text
@@ -46,7 +45,6 @@ instance Monad Expr where
   App t a b >>= f = App t (a >>= f) (fmap (>>= f) b)
   Yield a >>= f = Yield (a >>= f)
   For name ty a b >>= f = For name ty (a >>= f) (b >>>= f)
-  Filter name ty a b >>= f = Filter name ty (a >>>= f) (b >>= f)
   Where a b >>= f = Where (a >>= f) (b >>= f)
   Dot t a b >>= f = Dot t (a >>= f) b
   Splat a b >>= f = Splat (a >>= f) b
@@ -77,8 +75,6 @@ typeOf varType expr =
       Type.App (Type.Name "Relation") (typeOf varType a)
     For{} ->
       error "TODO: typeOf: For"
-    Filter{} ->
-      error "TODO: typeOf: Filter"
     Where{} ->
       error "TODO: typeOf: Where"
     Dot{} ->
