@@ -1,5 +1,30 @@
 # "Group by"
 
+[Relational algebra by way of adjunctions](https://doi.org/10.1145/3236781) uses an `indexBy`
+operation:
+
+```
+indexBy : (a -> k) -> Bag a -> Map k (Bag a)
+```
+
+Aggregations such as `SELECT COUNT(*) FROM x GROUP BY x.y` are `indexBy` followed by `map`:
+
+```
+indexBy _.y x   # Map k (Bag a)
+  |> map count  # Map k Int
+  |> Map.toBag  # Bag { key : k, value : Int }
+```
+
+I prefer to call it `groupBy` and reverse the arguments, maybe make it an infix operator:
+
+```
+x group by _.y # Map k (Bag a)
+  |> map count # Map k Int
+  |> Map.toBag # Bag { key : k, value : Int }
+```
+
+## Experimentation
+
 What's the type of "group by"?
 
 ```
