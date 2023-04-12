@@ -9,6 +9,7 @@ module Dblang.Parse (
 import Bound (Var (..), toScope)
 import Control.Applicative (many, optional, (<|>))
 import Data.Foldable (fold)
+import Data.Function ((&))
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
 import qualified Data.Vector as Vector
@@ -111,7 +112,15 @@ exprApp :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprApp toVar = foldl Expr.App <$> exprDot toVar <*> many (exprDot toVar)
 
 exprDot :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
-exprDot toVar = foldl Expr.Dot <$> exprAtom toVar <*> many (symbolic '.' *> ident)
+exprDot toVar =
+  foldl (&)
+    <$> exprAtom toVar
+    <*> many
+      ( symbolic '.'
+          *> ( flip Expr.Dot <$> ident
+                <|> flip Expr.Splat <$> braces (Vector.fromList <$> commaSep ident)
+             )
+      )
 
 exprAtom :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprAtom toVar =

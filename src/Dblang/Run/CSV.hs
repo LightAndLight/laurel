@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
-module Dblang.Run.CSV (eval, Error (..)) where
+module Dblang.Run.CSV (eval, Error (..), pretty) where
 
 import Bound (fromScope)
 import Bound.Scope (mapScope)
@@ -18,6 +18,7 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.IO as Text.IO
 import Data.Traversable (for)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
@@ -27,11 +28,13 @@ import Dblang.Definition.Table (Table (..))
 import Dblang.Expr (Expr (..))
 import qualified Dblang.Parse as Parse
 import qualified Dblang.Syntax as Syntax
+import Dblang.Type (Type)
 import qualified Dblang.Type as Type
 import Dblang.Typecheck (checkExpr, runTypecheck)
 import qualified Dblang.Typecheck as Typecheck
 import Dblang.Value (Value)
 import qualified Dblang.Value as Value
+import qualified Dblang.Value.Pretty as Value.Pretty
 import Streaming.Chars.Text (StreamText (..))
 import qualified System.FilePath as FilePath
 import Text.Sage (ParseError, parse)
@@ -183,7 +186,7 @@ eval ::
   MonadIO m =>
   Vector FilePath ->
   Text ->
-  m (Either Error Value)
+  m (Either Error (Value, Type))
 eval files input =
   runExceptT $ do
     (tablesType, tablesValue) <- do
@@ -240,7 +243,7 @@ eval files input =
       either (throwError . ParseError) pure $
         parse (Parse.expr Syntax.Name) (StreamText input)
 
-    (core, _ty) <-
+    (core, ty) <-
       either (throwError . TypeError) pure . runTypecheck $ do
         ty <- Typecheck.unknown
         core <- checkExpr (HashMap.singleton "tables" tablesType) absurd syntax ty
@@ -248,4 +251,14 @@ eval files input =
           <$> Typecheck.zonkExpr core
           <*> Typecheck.zonk ty
 
-    runExpr (HashMap.singleton "tables" tablesValue) absurd core
+    value <- runExpr (HashMap.singleton "tables" tablesValue) absurd core
+    pure (value, ty)
+
+pretty :: MonadIO m => Either Error (Value, Type) -> m ()
+pretty result =
+  liftIO $
+    case result of
+      Left err ->
+        print err
+      Right (value, ty) ->
+        Text.IO.putStrLn $ Value.Pretty.pretty value ty

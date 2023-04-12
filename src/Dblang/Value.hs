@@ -3,7 +3,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Dblang.Value (Multiset, fromVector, Value (..)) where
+module Dblang.Value (Multiset, fromVector, toVector, Value (..)) where
 
 import Bound (Scope)
 import Data.HashMap.Strict (HashMap)
@@ -21,6 +21,9 @@ newtype Multiset a = Multiset (Vector a)
 
 fromVector :: Vector a -> Multiset a
 fromVector = Multiset
+
+toVector :: Multiset a -> Vector a
+toVector (Multiset a) = a
 
 data Value
   = Relation (Multiset Value)

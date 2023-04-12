@@ -36,6 +36,7 @@ library
         Dblang.Type
         Dblang.Typecheck
         Dblang.Value
+        Dblang.Value.Pretty
     build-depends:
         base ^>=4.16.4.0,
         bound,
