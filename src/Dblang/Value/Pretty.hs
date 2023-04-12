@@ -1,25 +1,20 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Dblang.Value.Pretty (
   pretty,
   prettyType,
   Table (..),
   prettyTable,
-  Lines,
-  unlines,
-  line,
-  Vertically (..),
-  vertically,
-  Horizontally (..),
-  horizontally,
 ) where
 
-import Data.Foldable (foldl')
+import Data.Foldable (fold, foldl')
 import Data.Function ((&))
+import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.Maybe as Maybe
+import Data.Semigroup (stimesMonoid)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Vector (Vector)
@@ -28,6 +23,8 @@ import Dblang.Type (Type)
 import qualified Dblang.Type as Type
 import Dblang.Value (Value)
 import qualified Dblang.Value as Value
+import Pretty (Horizontally (..), IsLines, Vertically (..), horizontally)
+import qualified Pretty
 import Prelude hiding (unlines)
 
 prettyType :: Type -> Text
@@ -74,82 +71,6 @@ prettyType ty =
     Type.RNil{} -> undefined
     Type.Unknown n -> Text.pack $ "?" <> show n
 
-newtype Lines = Lines [Text]
-
-unlines :: Lines -> Text
-unlines (Lines ls) = Text.unlines ls
-
-newtype Horizontally = Horizontally Lines
-
-horizontally :: Horizontally -> Lines
-horizontally (Horizontally ls) = ls
-
-instance Semigroup Horizontally where
-  Horizontally a <> Horizontally b = Horizontally (hcat a b)
-
-instance Monoid Horizontally where
-  mempty = Horizontally empty
-
-newtype Vertically = Vertically Lines
-
-vertically :: Vertically -> Lines
-vertically (Vertically ls) = ls
-
-instance Semigroup Vertically where
-  Vertically a <> Vertically b = Vertically (vcat a b)
-
-instance Monoid Vertically where
-  mempty = Vertically empty
-
-empty :: Lines
-empty = Lines []
-
-vcat :: Lines -> Lines -> Lines
-vcat (Lines a) (Lines b) = Lines (a <> b)
-
-vtimes :: Int -> Lines -> Lines
-vtimes 0 _ = empty
-vtimes n x = x `vcat` vtimes (n - 1) x
-
-hcat :: Lines -> Lines -> Lines
-hcat (Lines a) (Lines b) =
-  Lines
-    . take (max (length a) (length b))
-    $ zipWith (<>) (a <> repeat "") (b <> repeat "")
-
-line :: Text -> Lines
-line = Lines . pure
-
-linesWidth :: Lines -> Int
-linesWidth (Lines ls) = foldl' max 0 (fmap Text.length ls)
-
-linesHeight :: Lines -> Int
-linesHeight (Lines ls) = length ls
-
-rightPadLines :: Int -> Text -> Lines -> Lines
-rightPadLines width padding (Lines ls) =
-  Lines $
-    fmap
-      ( \l ->
-          let lLength = Text.length l
-           in l <> Text.replicate (max 0 (width - lLength)) padding
-      )
-      ls
-
-downPadLines :: Int -> Text -> Lines -> Lines
-downPadLines height padding (Lines ls) =
-  Lines $ ls <> replicate (max 0 (height - length ls)) padding
-
-indent :: Int -> Lines -> Lines
-indent n (Lines ls) = Lines $ fmap (Text.replicate n " " <>) ls
-
-append :: Lines -> Text -> Lines
-append (Lines ls) value = Lines $ go ls
- where
-  go [] = []
-  go [x] = [x <> value]
-  go (x : xs@(_ : _)) = x : go xs
-
 isTable :: Type -> Bool
 isTable ty =
   case ty of
@@ -157,7 +78,7 @@ isTable ty =
     Type.App (Type.App (Type.Name "Map") _) _ -> True
     _ -> False
 
-pretty :: Value -> Type -> Lines
+pretty :: IsLines lines => Value -> Type -> lines
 pretty value ty =
   case value of
     Value.Relation values ->
@@ -212,46 +133,55 @@ pretty value ty =
         Just tyFields ->
           if any (\(_, fieldType) -> isTable fieldType) tyFields
             then
-              line "{"
-                `vcat` indent
-                  2
-                  ( case Vector.unsnoc tyFields of
-                      Nothing ->
-                        -- impossible, because if tyFields was empty then we'd be in the
-                        -- horizontal case
-                        undefined
-                      Just (rest, (fieldName, fieldType)) ->
-                        vertically
+              Pretty.vfold @[]
+                [ Pretty.line "{"
+                , case Vector.unsnoc tyFields of
+                    Nothing ->
+                      -- impossible, because if tyFields was empty then we'd be in the `else` branch
+                      undefined
+                    Just (rest, (fieldName, fieldType)) ->
+                      Pretty.indent 2 $
+                        Pretty.vertically
                           ( foldMap
                               ( \(fieldName', fieldType') ->
-                                  Vertically $
-                                    prettyField fields fieldName' fieldType' `append` ","
+                                  prettyField fields fieldName' fieldType' `Pretty.append` ","
                               )
                               rest
                           )
-                          `vcat` prettyField fields fieldName fieldType
-                  )
-                `vcat` line "}"
+                          `Pretty.vcat` prettyField fields fieldName fieldType
+                , Pretty.line "}"
+                ]
             else
-              line "{"
-                `hcat` (if null tyFields then empty else line " ")
-                `hcat` horizontally (sepBy (fmap (Horizontally . uncurry (prettyField fields)) tyFields) (Horizontally $ line ", "))
-                `hcat` (if null tyFields then empty else line " ")
-                `hcat` line "}"
+              Pretty.hfold @[]
+                [ Pretty.line "{"
+                , if null tyFields then Pretty.empty else Pretty.line " "
+                , Pretty.horizontally $
+                    Pretty.sepBy
+                      (fmap (uncurry (prettyField fields)) tyFields)
+                      (Pretty.line ", ")
+                , if null tyFields then Pretty.empty else Pretty.line " "
+                , Pretty.line "}"
+                ]
         Nothing ->
           error $ "invalid type for Map: " <> show ty
-    Value.Int i -> line . Text.pack $ show i
-    Value.Bool b -> line $ if b then "true" else "false"
-    Value.String s -> line s
-    Value.Unit -> line "()"
-    Value.Lam{} -> line "<function>"
+    Value.Int i ->
+      Pretty.line . Text.pack $ show i
+    Value.Bool b ->
+      Pretty.line $ if b then "true" else "false"
+    Value.String s ->
+      Pretty.line s
+    Value.Unit ->
+      Pretty.line "()"
+    Value.Lam{} ->
+      Pretty.line "<function>"
  where
+  prettyField :: IsLines lines => HashMap Text Value -> Text -> Type -> lines
   prettyField fields fieldName fieldType =
-    line (fieldName <> " = ")
+    Pretty.line (fieldName <> " = ")
       & if isTable fieldType
         then
-          ( `vcat`
-              indent
+          ( `Pretty.vcat`
+              Pretty.indent
                 2
                 ( pretty
                     ( Maybe.fromMaybe
@@ -262,7 +192,7 @@ pretty value ty =
                 )
           )
         else
-          ( `hcat`
+          ( `Pretty.hcat`
               pretty
                 ( Maybe.fromMaybe
                     (error $ "field " <> show fieldName <> " not found in " <> show fields)
@@ -297,24 +227,17 @@ pretty value ty =
 (├) = "├"
 (┤) = "┤"
 
-data Table = Table {header :: Vector Text, body :: Vector (Vector Lines)}
+data Table lines = Table {header :: Vector Text, body :: Vector (Vector lines)}
 
-sepBy :: Monoid m => Vector m -> m -> m
-sepBy ms sep =
-  case Vector.uncons ms of
-    Nothing ->
-      mempty
-    Just (m, rest) ->
-      m <> foldMap (sep <>) rest
-
-{-# HLINT ignore "Use map" #-}
-prettyTable :: Table -> Lines
+prettyTable :: IsLines lines => Table lines -> lines
 prettyTable table =
-  line (prettyBorder (╭) (┬) (╮))
-    `vcat` prettyRow (fmap line table.header)
-    `vcat` line (prettyBorder (├) (┼) (┤))
-    `vcat` foldr (\row rest -> prettyRow row `vcat` rest) empty table.body
-    `vcat` line (prettyBorder (╰) (┴) (╯))
+  Pretty.vertically . fold @[] $
+    [ prettyBorder (╭) (┬) (╮)
+    , prettyRow $ Vector.zipWith (\a b -> (a, Pretty.line b)) columnContentWidths table.header
+    , prettyBorder (├) (┼) (┤)
+    , foldMap @Vector (Vertically . prettyRow . Vector.zip columnContentWidths) table.body
+    , prettyBorder (╰) (┴) (╯)
+    ]
  where
   -- The width of each column's content. Each column is as wide as its widest content.
   columnContentWidths :: Vector Int
@@ -324,7 +247,7 @@ prettyTable table =
           if length widths == length row
             then
               Vector.zipWith
-                (\width content -> max width (linesWidth content))
+                (\width content -> max width (Pretty.width content))
                 widths
                 row
             else
@@ -337,26 +260,28 @@ prettyTable table =
       (fmap Text.length table.header)
       table.body
 
-  prettyBorder :: Text -> Text -> Text -> Text
+  prettyBorder :: IsLines lines => Text -> Text -> Text -> lines
   prettyBorder left middle right =
-    left
-      <> sepBy (fmap (\width -> (─) <> Text.replicate width (─) <> (─)) columnContentWidths) middle
-      <> right
+    horizontally . fold @[] $
+      [ Pretty.line left
+      , Pretty.sepBy
+          (fmap (\width -> Pretty.line $ (─) <> Text.replicate width (─) <> (─)) columnContentWidths)
+          (Pretty.line middle)
+      , Pretty.line right
+      ]
 
-  prettyRow :: Vector Lines -> Lines
-  prettyRow row =
-    vtimes rowHeight (line $ (│) <> " ")
-      `hcat` horizontally
-        ( sepBy
-            ( Horizontally
-                <$> Vector.zipWith
-                  (\width content -> rightPadLines width " " $ downPadLines rowHeight "" content)
-                  columnContentWidths
-                  row
-            )
-            (Horizontally $ vtimes rowHeight (line $ " " <> (│) <> " "))
+prettyRow :: IsLines lines => Vector (Int, lines) -> lines
+prettyRow row =
+  horizontally . fold @[] $
+    [ Pretty.vertically $ stimesMonoid rowHeight (Pretty.line $ (│) <> " ")
+    , Pretty.sepBy
+        ( fmap
+            (\(width, content) -> Pretty.rightPad width ' ' $ Pretty.downPad rowHeight "" $ Horizontally content)
+            row
         )
-      `hcat` vtimes rowHeight (line $ " " <> (│))
-   where
-    rowHeight :: Int
-    rowHeight = foldl' max 0 (fmap linesHeight row)
+        (Pretty.vertically $ stimesMonoid rowHeight (Pretty.line $ " " <> (│) <> " "))
+    , Pretty.vertically $ stimesMonoid rowHeight (Pretty.line $ " " <> (│))
+    ]
+ where
+  rowHeight :: Int
+  rowHeight = foldl' max 0 $ fmap (Pretty.height . snd) row

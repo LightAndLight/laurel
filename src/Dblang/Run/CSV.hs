@@ -35,6 +35,7 @@ import qualified Dblang.Typecheck as Typecheck
 import Dblang.Value (Value)
 import qualified Dblang.Value as Value
 import qualified Dblang.Value.Pretty as Value.Pretty
+import qualified Pretty
 import Streaming.Chars.Text (StreamText (..))
 import qualified System.FilePath as FilePath
 import Text.Parser.Combinators (eof)
@@ -262,4 +263,4 @@ pretty result =
       Left err ->
         print err
       Right (value, ty) ->
-        Text.IO.putStrLn . Value.Pretty.unlines $ Value.Pretty.pretty value ty
+        Text.IO.putStrLn . Pretty.unlines $ Value.Pretty.pretty value ty
