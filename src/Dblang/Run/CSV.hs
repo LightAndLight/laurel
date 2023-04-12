@@ -37,6 +37,7 @@ import qualified Dblang.Value as Value
 import qualified Dblang.Value.Pretty as Value.Pretty
 import Streaming.Chars.Text (StreamText (..))
 import qualified System.FilePath as FilePath
+import Text.Parser.Combinators (eof)
 import Text.Sage (ParseError, parse)
 
 data Error
@@ -241,7 +242,7 @@ eval files input =
 
     syntax <-
       either (throwError . ParseError) pure $
-        parse (Parse.expr Syntax.Name) (StreamText input)
+        parse (Parse.expr Syntax.Name <* eof) (StreamText input)
 
     (core, ty) <-
       either (throwError . TypeError) pure . runTypecheck $ do

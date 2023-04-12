@@ -7,19 +7,20 @@ module Dblang.Parse (
 ) where
 
 import Bound (Var (..), toScope)
-import Control.Applicative (many, optional, (<|>))
+import Control.Applicative (many, optional, some, (<|>))
 import Data.Foldable (fold)
 import Data.Function ((&))
 import qualified Data.Maybe as Maybe
 import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 import Dblang.Syntax (Command (..), Constraint (..), Definition (..), Expr, TableItem (..))
 import qualified Dblang.Syntax as Expr (Expr (..))
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
 import Streaming.Chars (Chars)
-import Text.Parser.Char (CharParsing, alphaNum, lower, upper)
-import Text.Parser.Combinators ((<?>))
+import Text.Parser.Char (CharParsing, alphaNum, char, lower, notChar, upper)
+import Text.Parser.Combinators (between, (<?>))
 import Text.Parser.Token (braces, brackets, comma, commaSep, integer, parens, stringLiteral, symbol, symbolic)
 import qualified Text.Parser.Token
 import qualified Text.Parser.Token.Highlight
@@ -48,7 +49,14 @@ constructorStyle =
     }
 
 ident :: Chars s => Parser s Text
-ident = Text.Parser.Token.ident idStyle
+ident =
+  Text.Parser.Token.ident idStyle
+    <|> between
+      (symbolic '`')
+      (symbolic '`')
+      ( fmap Text.pack . some $
+          notChar '`' <|> char '\\' *> (char '\\' <|> char '`')
+      )
 
 constructor :: Chars s => Parser s Text
 constructor = Text.Parser.Token.ident constructorStyle
@@ -59,10 +67,7 @@ keyword = Text.Parser.Token.reserveText idStyle
 expr :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 expr toVar =
   exprLam toVar
-    <|> exprFor toVar
-    <|> exprWhere toVar
-    <|> exprYield toVar
-    <|> exprOperator toVar
+    <|> exprGroupBy toVar
 
 exprLam :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprLam toVar = do
@@ -72,13 +77,34 @@ exprLam toVar = do
   body <- expr (\name' -> if name' == name then Expr.Var (B ()) else fmap F (toVar name'))
   pure $ Expr.Lam name (toScope body)
 
+data Operator = Equals
+  deriving (Eq, Show)
+
+operator :: Chars s => Parser s Operator
+operator =
+  Equals <$ symbol "=="
+
+exprGroupBy :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
+exprGroupBy toVar =
+  foldl
+    Expr.GroupBy
+    <$> exprQuery toVar
+    <*> many (((keyword "group" *> keyword "by") <?> "group by") *> exprOperator toVar)
+
+exprQuery :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
+exprQuery toVar =
+  exprWhere toVar
+    <|> exprYield toVar
+    <|> exprFor toVar
+    <|> exprOperator toVar
+
 exprWhere :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprWhere toVar =
-  Expr.Where <$ keyword "where" <*> expr toVar <*> expr toVar
+  Expr.Where <$ keyword "where" <*> expr toVar <*> exprQuery toVar
 
 exprYield :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprYield toVar =
-  Expr.Yield <$ keyword "yield" <*> expr toVar
+  Expr.Yield <$ keyword "yield" <*> exprDot toVar
 
 exprFor :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprFor toVar = do
@@ -86,16 +112,8 @@ exprFor toVar = do
   name <- ident
   keyword "in"
   collection <- expr toVar
-  body <- expr (\name' -> if name' == name then Expr.Var (B ()) else fmap F (toVar name'))
+  body <- exprQuery (\name' -> if name' == name then Expr.Var (B ()) else fmap F (toVar name'))
   pure $ Expr.For name collection (toScope body)
-
-data Operator = Equals | GroupBy
-  deriving (Eq, Show)
-
-operator :: Chars s => Parser s Operator
-operator =
-  Equals <$ symbol "=="
-    <|> ((GroupBy <$ keyword "group" <* keyword "by") <?> "group by")
 
 exprOperator :: Chars s => (Text -> Expr a) -> Parser s (Expr a)
 exprOperator toVar =
@@ -103,7 +121,6 @@ exprOperator toVar =
     ( \l' (op, r) ->
         case op of
           Equals -> Expr.Equals l' r
-          GroupBy -> Expr.GroupBy l' r
     )
     <$> exprApp toVar
     <*> many ((,) <$> operator <*> exprApp toVar)
