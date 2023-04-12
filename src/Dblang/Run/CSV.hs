@@ -261,4 +261,4 @@ pretty result =
       Left err ->
         print err
       Right (value, ty) ->
-        Text.IO.putStrLn $ Value.Pretty.pretty value ty
+        Text.IO.putStrLn . Value.Pretty.unlines $ Value.Pretty.pretty value ty
