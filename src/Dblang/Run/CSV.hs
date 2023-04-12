@@ -13,7 +13,7 @@ import Control.Monad.Except (runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import qualified Data.Csv as Csv
-import Data.Foldable (foldl')
+import Data.Foldable (foldl', foldrM)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
@@ -107,6 +107,25 @@ runExpr context varValue expr =
             then runExpr context varValue rest
             else pure $ Value.Relation mempty
         _ -> error $ "expected bool, got " <> show condition'
+    GroupBy _ _ collection projection -> do
+      collection' <- runExpr context varValue collection
+      case collection' of
+        Value.Relation values -> do
+          projection' <- runExpr context varValue projection
+          case projection' of
+            Value.Lam _ projection'' -> do
+              Value.Map . fmap Value.Relation
+                <$> foldrM
+                  ( \value rest -> do
+                      key <- runExpr context (unvar ([value] Vector.!) id) $ fromScope projection''
+                      pure $ HashMap.insertWith (\new old -> old <> new) key (Value.fromVector [value]) rest
+                  )
+                  mempty
+                  values
+            _ ->
+              error $ "expected function, got " <> show projection'
+        _ ->
+          error $ "expected relation, got " <> show collection'
     Dot _ record field -> do
       record' <- runExpr context varValue record
       case record' of

@@ -1,12 +1,11 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
-module Dblang.Run.Postgres (eval, define, run, Error (..)) where
+module Dblang.Run.Postgres (eval, define, assume, run, Error (..)) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Foldable (foldlM)
+import Data.Foldable (foldl', foldlM)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text.Encoding
@@ -43,6 +42,10 @@ resultDecoder ty =
   case ty of
     Type.App (Type.Name "Relation") a ->
       Relation . Value.fromVector <$> Decode.rowVector (rowDecoder a)
+    Type.App (Type.App (Type.Name "Map") k) v ->
+      Map . foldl' (\acc (key, value) -> HashMap.insert key value acc) mempty
+        <$> Decode.rowVector
+          ((,) <$> Decode.column (valueDecoder k) <*> Decode.column (valueDecoder v))
     _ ->
       Decode.singleRow (rowDecoder ty)
 
@@ -84,6 +87,8 @@ valueDecoder ty =
                     mempty
                     fields
                 )
+      Type.App (Type.Name "Relation") a ->
+        Decode.array (Decode.element (valueDecoder a))
       _ ->
         error $ "valueDecoder: invalid type " <> show ty
 
@@ -165,6 +170,22 @@ define conn input =
           conn
 
     either (throwError . QueryError) pure queryResult
+
+    pure core
+
+assume :: MonadIO m => Text -> m (Either Error Definition)
+assume input =
+  runExceptT $ do
+    syntax <-
+      either (throwError . ParseError) pure $
+        parse Parse.definition (StreamText input)
+
+    core <-
+      either (throwError . TypeError) pure . runTypecheck $
+        checkDefinition syntax
+
+    let query = compileDefinition core
+    liftIO . putStrLn $ "query: " <> show query
 
     pure core
 

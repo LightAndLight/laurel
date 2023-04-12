@@ -44,13 +44,16 @@ library
         deriving-compat,
         dlist,
         filepath,
+        hashable,
         hasql,
         mtl,
         unordered-containers,
         parsers,
         text >=2.0,
         sage,
-        vector
+        vector,
+        -- instance Hashable a => Hashable (Vector a)
+        vector-instances
     hs-source-dirs:   src
     default-language: Haskell2010
 

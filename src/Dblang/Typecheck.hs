@@ -118,6 +118,8 @@ zonkExpr expr =
       Expr.App <$> zonk ty <*> zonkExpr a <*> traverse zonkExpr b
     Expr.Yield a ->
       Expr.Yield <$> zonkExpr a
+    Expr.GroupBy t1 t2 a b ->
+      Expr.GroupBy <$> zonk t1 <*> zonk t2 <*> zonkExpr a <*> zonkExpr b
     Expr.For name ty a b ->
       Expr.For name <$> zonk ty <*> zonkExpr a <*> transverseScope zonkExpr b
     Expr.Where condition rest ->
@@ -440,6 +442,18 @@ checkExpr nameTypes varType expr expectedTy =
       unify expectedTy (Type.App (Type.Name "Relation") a)
       value' <- checkExpr nameTypes varType value a
       pure $ Yield value'
+    Syntax.GroupBy collection projection -> do
+      {-
+      a : Relation v         b : v -> k
+      ---------------------------------
+      a group by b : Map k (Relation v)
+      -}
+      keyTy <- unknown
+      valueTy <- unknown
+      unify expectedTy (Type.App (Type.App (Type.Name "Map") keyTy) (Type.App (Type.Name "Relation") valueTy))
+      collection' <- checkExpr nameTypes varType collection (Type.App (Type.Name "Relation") valueTy)
+      projection' <- checkExpr nameTypes varType projection (Type.arrow valueTy keyTy)
+      pure $ GroupBy keyTy valueTy collection' projection'
     Syntax.Record fields -> do
       expectedRow <- unknown
       unify expectedTy (Type.App (Type.Name "Record") expectedRow)

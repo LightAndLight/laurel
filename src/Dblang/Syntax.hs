@@ -34,6 +34,8 @@ data Expr a
     Where (Expr a) (Expr a)
   | -- | `yield a`
     Yield (Expr a)
+  | -- | `a group by b`
+    GroupBy (Expr a) (Expr a)
   | Record (Vector (Text, Expr a))
   | Equals (Expr a) (Expr a)
   | Int Int
@@ -55,6 +57,7 @@ instance Monad Expr where
   For name a b >>= f = For name (a >>= f) (b >>>= f)
   Where a b >>= f = Where (a >>= f) (b >>= f)
   Yield a >>= f = Yield (a >>= f)
+  GroupBy a b >>= f = GroupBy (a >>= f) (b >>= f)
   Record fields >>= f = Record $ (fmap . fmap) (>>= f) fields
   Equals a b >>= f = Equals (a >>= f) (b >>= f)
   Int i >>= _ = Int i

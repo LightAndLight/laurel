@@ -291,7 +291,10 @@ compileRelation varInfo expr =
       error "compileRelation: impossible Bool"
     Expr.String{} ->
       error "compileRelation: impossible String"
+    Expr.GroupBy{} ->
+      error "compileRelation: impossible GroupBy"
 
+-- | Compile an expression of any type to an executable SQL query.
 compileQuery :: (a -> VarInfo) -> Expr a -> Builder
 compileQuery varInfo expr =
   case expr of
@@ -307,6 +310,14 @@ compileQuery varInfo expr =
       compileSelect $ compileRelation varInfo expr
     Expr.Where{} ->
       compileSelect $ compileRelation varInfo expr
+    Expr.GroupBy{valueType, collection, projection} ->
+      let groupExpression = compileExpr varInfo (Expr.app valueType projection $ Expr.Name "to_group")
+       in "WITH to_group AS "
+            <> parens (compileSelect (compileRelation varInfo collection))
+            <> " SELECT "
+            <> groupExpression
+            <> " AS key, ARRAY_AGG(to_group) AS value FROM to_group GROUP BY "
+            <> groupExpression
     Expr.App{} ->
       compileExpr varInfo expr
     Expr.Splat{} ->
@@ -334,6 +345,7 @@ compileFrom varInfo expr =
     _ ->
       queryParens (compileQuery varInfo) expr
 
+-- | Compile an expression to a [select list](https://www.postgresql.org/docs/current/queries-select-lists.html).
 compileSelectList :: (a -> VarInfo) -> Expr a -> Builder
 compileSelectList varInfo expr =
   case expr of
@@ -354,6 +366,8 @@ compileSelectList varInfo expr =
       error "TODO: compileSelectList Yield"
     Expr.For{} ->
       error "TODO: compileSelectList For"
+    Expr.GroupBy{} ->
+      error "TODO: compileSelectList GroupBy"
     Expr.Where{} ->
       error "TODO: compileSelectList Where"
     Expr.Splat expr' names ->
@@ -381,6 +395,7 @@ compileSelectList varInfo expr =
     Expr.String{} ->
       parens (compileExpr varInfo expr) <> " AS it"
 
+-- | Compile an expression to an SQL expression (not a query).
 compileExpr :: (a -> VarInfo) -> Expr a -> Builder
 compileExpr varInfo expr =
   case expr of
@@ -394,6 +409,8 @@ compileExpr varInfo expr =
       error "TODO: compileExpr Yield"
     Expr.For{} ->
       error "TODO: compileExpr For"
+    Expr.GroupBy{} ->
+      error "TODO: compileExpr GroupBy"
     Expr.Where{} ->
       error "TODO: compileExpr Where"
     Expr.App _ function args ->

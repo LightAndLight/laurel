@@ -1,11 +1,15 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module Dblang.Type (Type (..), arrow, matchArrow, record, matchRecord, matchRow, replaceDefinitions) where
 
 import Data.Bifunctor (first)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import Data.Hashable (Hashable)
 import Data.Text (Text)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
+import GHC.Generics (Generic)
 
 data Type
   = Name Text
@@ -13,7 +17,9 @@ data Type
   | RCons Text Type Type
   | RNil
   | Unknown Int
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance Hashable Type
 
 arrow :: Type -> Type -> Type
 arrow a = App (App (Name "Arrow") a)
