@@ -28,6 +28,7 @@ library
         Dblang.Definition.Constraint
         Dblang.Definition.Table
         Dblang.Expr
+        Dblang.Eval
         Dblang.Parse
         Dblang.Syntax
         Dblang.Type
