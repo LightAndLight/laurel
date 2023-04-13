@@ -1,5 +1,5 @@
 cabal-version:      3.0
-name:               dblang-cli
+name:               dblang-csv
 version:            0.1.0.0
 license:            BSD-3-Clause
 license-file:       LICENSE
@@ -20,18 +20,22 @@ common extensions
         OverloadedLists
         OverloadedStrings
 
-executable dblang
+library
     import:           warnings, extensions
-    main-is:          Main.hs
-    other-modules:
-        Repl
+    exposed-modules:
+        Dblang.Run.CSV
     build-depends:
         base ^>=4.16.4.0,
-        ansi-terminal,
+        bound,
+        bytestring,
+        cassava,
         dblang,
-        dblang-csv,
-        dblang-postgres,
-        optparse-applicative,
-        streaming
-    hs-source-dirs:   app
+        filepath,
+        mtl,
+        parsers,
+        sage,
+        text >=2.0,
+        unordered-containers,
+        vector
+    hs-source-dirs:   src
     default-language: Haskell2010
