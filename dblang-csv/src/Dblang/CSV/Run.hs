@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
-module Dblang.CSV.Run (eval, Error (..), pretty) where
+module Dblang.CSV.Run (mkRun, eval, CsvError (..), pretty) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
@@ -22,6 +22,8 @@ import qualified Dblang.Definition as Definition
 import Dblang.Definition.Table (Table (..))
 import qualified Dblang.Eval
 import qualified Dblang.Parse as Parse
+import Dblang.Run (Run (..), RunError)
+import qualified Dblang.Run as RunError (RunError (..))
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
@@ -34,12 +36,13 @@ import qualified Pretty
 import Streaming.Chars.Text (StreamText (..))
 import qualified System.FilePath as FilePath
 import Text.Parser.Combinators (eof)
-import Text.Sage (ParseError, parse)
+import Text.Sage (parse)
 
-data Error
-  = ParseError ParseError
-  | TypeError Typecheck.Error
-  | CsvError String
+mkRun :: MonadIO m => Vector FilePath -> Run m
+mkRun files = Run{eval = eval files}
+
+data CsvError
+  = CsvError String
   deriving (Eq, Show)
 
 {- | Run a query against a set of CSV files.
@@ -67,14 +70,14 @@ eval ::
   MonadIO m =>
   Vector FilePath ->
   Text ->
-  m (Either Error (Value, Type))
+  m (Either (RunError CsvError) (Value, Type))
 eval files input =
   runExceptT $ do
     (tablesType, tablesValue) <- do
       (definitions, context) <- fmap Vector.unzip . for files $ \file -> do
         contents <- liftIO $ ByteString.Lazy.readFile file
 
-        table :: Vector (Vector Text) <- either (throwError . CsvError) pure $ Csv.decode Csv.NoHeader contents
+        table :: Vector (Vector Text) <- either (throwError . RunError.OtherError . CsvError) pure $ Csv.decode Csv.NoHeader contents
         (types, body) <- case Vector.uncons table of
           Nothing ->
             error $ "table " <> show file <> " missing header"
@@ -121,11 +124,11 @@ eval files input =
         )
 
     syntax <-
-      either (throwError . ParseError) pure $
+      either (throwError . RunError.ParseError) pure $
         parse (Parse.expr Syntax.Name <* eof) (StreamText input)
 
     (core, ty) <-
-      either (throwError . TypeError) pure . runTypecheck $ do
+      either (throwError . RunError.TypeError) pure . runTypecheck $ do
         ty <- Typecheck.unknown
         core <- checkExpr (HashMap.singleton "tables" tablesType) absurd syntax ty
         (,)
@@ -135,7 +138,7 @@ eval files input =
     value <- Dblang.Eval.eval (HashMap.singleton "tables" tablesValue) absurd core
     pure (value, ty)
 
-pretty :: MonadIO m => Either Error (Value, Type) -> m ()
+pretty :: MonadIO m => Either (RunError CsvError) (Value, Type) -> m ()
 pretty result =
   liftIO $
     case result of

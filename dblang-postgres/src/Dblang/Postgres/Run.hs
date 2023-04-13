@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module Dblang.Postgres.Run (eval, define, assume, run, Error (..)) where
+module Dblang.Postgres.Run (mkRun, eval, define, assume, run, PostgresError (..)) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
@@ -20,6 +20,8 @@ import qualified Dblang.Definition as Definition
 import Dblang.Definition.Table (Table (..))
 import qualified Dblang.Parse as Parse
 import Dblang.Postgres.Compile (compileCommand, compileDefinition, compileQuery)
+import Dblang.Run (Run (..), RunError)
+import qualified Dblang.Run as RunError (RunError (..))
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type
@@ -35,7 +37,10 @@ import Hasql.Session (QueryError)
 import qualified Hasql.Session as Postgres
 import Hasql.Statement (Statement (..))
 import Streaming.Chars.Text (StreamText (..))
-import Text.Sage (ParseError, parse)
+import Text.Sage (parse)
+
+mkRun :: MonadIO m => Connection -> Vector Definition -> Run m
+mkRun conn definitions = Run{eval = eval conn definitions}
 
 resultDecoder :: Type -> Result Value
 resultDecoder ty =
@@ -92,10 +97,8 @@ valueDecoder ty =
       _ ->
         error $ "valueDecoder: invalid type " <> show ty
 
-data Error
-  = ParseError ParseError
-  | TypeError Typecheck.Error
-  | QueryError QueryError
+data PostgresError
+  = QueryError QueryError
   deriving (Eq, Show)
 
 eval ::
@@ -103,7 +106,7 @@ eval ::
   Connection ->
   Vector Definition ->
   Text ->
-  m (Either Error Value)
+  m (Either (RunError PostgresError) (Value, Type))
 eval conn definitions input =
   runExceptT $ do
     let tablesType =
@@ -115,11 +118,11 @@ eval conn definitions input =
               definitions
 
     syntax <-
-      either (throwError . ParseError) pure $
+      either (throwError . RunError.ParseError) pure $
         parse (Parse.expr Syntax.Name) (StreamText input)
 
     (core, ty) <-
-      either (throwError . TypeError) pure . runTypecheck $ do
+      either (throwError . RunError.TypeError) pure . runTypecheck $ do
         ty <- Typecheck.unknown
         core <- checkExpr (HashMap.singleton "tables" tablesType) absurd syntax ty
         (,)
@@ -143,17 +146,18 @@ eval conn definitions input =
           )
           conn
 
-    either (throwError . QueryError) pure queryResult
+    value <- either (throwError . RunError.OtherError . QueryError) pure queryResult
+    pure (value, ty)
 
-define :: MonadIO m => Connection -> Text -> m (Either Error Definition)
+define :: MonadIO m => Connection -> Text -> m (Either (RunError PostgresError) Definition)
 define conn input =
   runExceptT $ do
     syntax <-
-      either (throwError . ParseError) pure $
+      either (throwError . RunError.ParseError) pure $
         parse Parse.definition (StreamText input)
 
     core <-
-      either (throwError . TypeError) pure . runTypecheck $
+      either (throwError . RunError.TypeError) pure . runTypecheck $
         checkDefinition syntax
 
     let query = compileDefinition core
@@ -169,19 +173,19 @@ define conn input =
           )
           conn
 
-    either (throwError . QueryError) pure queryResult
+    either (throwError . RunError.OtherError . QueryError) pure queryResult
 
     pure core
 
-assume :: MonadIO m => Text -> m (Either Error Definition)
+assume :: MonadIO m => Text -> m (Either (RunError PostgresError) Definition)
 assume input =
   runExceptT $ do
     syntax <-
-      either (throwError . ParseError) pure $
+      either (throwError . RunError.ParseError) pure $
         parse Parse.definition (StreamText input)
 
     core <-
-      either (throwError . TypeError) pure . runTypecheck $
+      either (throwError . RunError.TypeError) pure . runTypecheck $
         checkDefinition syntax
 
     let query = compileDefinition core
@@ -194,15 +198,15 @@ run ::
   Connection ->
   Vector Definition ->
   Text ->
-  m (Either Error Value)
+  m (Either (RunError PostgresError) Value)
 run conn definitions input =
   runExceptT $ do
     syntax <-
-      either (throwError . ParseError) pure $
+      either (throwError . RunError.ParseError) pure $
         parse Parse.command (StreamText input)
 
     command <-
-      either (throwError . TypeError) pure . runTypecheck $
+      either (throwError . RunError.TypeError) pure . runTypecheck $
         Typecheck.checkCommand definitions syntax
 
     let query = compileCommand command
@@ -222,4 +226,4 @@ run conn definitions input =
           )
           conn
 
-    either (throwError . QueryError) pure queryResult
+    either (throwError . RunError.OtherError . QueryError) pure queryResult

@@ -32,6 +32,8 @@ executable dblang
         dblang-csv,
         dblang-postgres,
         optparse-applicative,
-        streaming
+        streaming,
+        text >=2.0,
+        vector
     hs-source-dirs:   app
     default-language: Haskell2010

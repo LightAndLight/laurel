@@ -38,7 +38,7 @@ import Prelude hiding (lines, unlines)
 newtype Lines = Lines {value :: [Text]}
 
 unlines :: Lines -> Text
-unlines (Lines ls) = Text.unlines ls
+unlines (Lines ls) = Text.intercalate "\n" ls
 
 class IsLines lines where
   width :: lines -> Int

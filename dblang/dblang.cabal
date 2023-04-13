@@ -30,6 +30,7 @@ library
         Dblang.Expr
         Dblang.Eval
         Dblang.Parse
+        Dblang.Run
         Dblang.Syntax
         Dblang.Type
         Dblang.Typecheck

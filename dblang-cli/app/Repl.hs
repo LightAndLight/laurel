@@ -4,6 +4,12 @@
 module Repl (run) where
 
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
+import qualified Data.Text as Text
+import qualified Data.Vector as Vector
+import qualified Dblang.CSV.Run as Dblang.Csv.Run
+import Dblang.Run (Run (..))
+import Dblang.Value.Pretty (pretty)
+import qualified Pretty
 import Streaming (Of (..), Stream, hoist, lift, liftIO)
 import qualified Streaming.Prelude as Streaming
 import qualified System.Console.ANSI as Terminal
@@ -24,17 +30,18 @@ run inputHandle outputHandle = do
   hSetEcho inputHandle False
   hSetBuffering inputHandle NoBuffering
 
-  outputs <- repl <$> terminalInputs inputHandle
+  adapterRef <- newIORef Nothing
+  outputs <- repl adapterRef <$> terminalInputs inputHandle
 
   Streaming.mapM_ (\content -> hPutStr outputHandle content *> hFlush outputHandle) outputs
 
-repl :: Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
-repl inputs = do
+repl :: IORef (Maybe (Run IO)) -> Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
+repl adapterRef inputs = do
   Streaming.yield "Welcome to the dblang REPL. Type :quit to exit.\n"
-  loop inputs
+  loop adapterRef inputs
 
-loop :: Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
-loop =
+loop :: IORef (Maybe (Run IO)) -> Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
+loop adapterRef =
   go $ \continue break inputs -> do
     Streaming.yield "> "
     (inputs', line) <- readLine inputs
@@ -46,12 +53,23 @@ loop =
           "postgres" -> do
             Streaming.yield (show (":connect" :: String, adapter, args))
           "csv" -> do
-            Streaming.yield (show (":connect" :: String, adapter, args))
+            lift $ writeIORef adapterRef . Just $ Dblang.Csv.Run.mkRun (Vector.fromList args)
+            Streaming.yield "connected\n"
           _ -> do
             Streaming.yield (show ("error: unknown adapter " <> show adapter))
         continue inputs'
       _ -> do
-        Streaming.yield $ "you wrote: " <> line <> "\n"
+        mAdapter <- lift $ readIORef adapterRef
+        case mAdapter of
+          Nothing ->
+            Streaming.yield "error: no connection found\n"
+          Just Run{eval} -> do
+            result <- lift . eval $ Text.pack line
+            case result of
+              Left err ->
+                Streaming.yield $ show err <> "\n"
+              Right (value, ty) ->
+                Streaming.yield $ Text.unpack (Pretty.unlines $ pretty value ty) <> "\n"
         continue inputs'
  where
   go :: Monad m => (forall x. (s -> m x) -> (a -> m x) -> s -> m x) -> s -> m a
