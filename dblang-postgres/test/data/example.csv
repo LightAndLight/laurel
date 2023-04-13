@@ -1,0 +1,8 @@
+merchant,transaction type,amount,category
+Google,debit,10.00,tech
+NAB,credit,5.00,finance
+Spotify,debit,12.00,entertainment
+Some Cafe,debit,22.00,eating out
+Hotpot Restaurant,debit,50.00,eating out
+Woolworths,debit,38.00,groceries
+NAB,credit,5.00,finance

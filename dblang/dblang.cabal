@@ -61,7 +61,6 @@ test-suite dblang-test
     hs-source-dirs:   test
     main-is:          Main.hs
     other-modules:
-        Test.Dblang.Compile.Postgres
         Test.Dblang.Parse
         Test.Dblang.Typecheck
     build-depends:

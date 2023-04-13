@@ -37,3 +37,21 @@ library
         vector
     hs-source-dirs:   src
     default-language: Haskell2010
+
+test-suite dblang-postgres-test
+    import:           warnings, extensions
+    default-language: Haskell2010
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    other-modules:
+        Test.Dblang.Compile.Postgres
+    build-depends:
+        base ^>=4.16.4.0,
+        bound,
+        dblang,
+        dblang-postgres,
+        hspec,
+        sage,
+        text,
+        vector
