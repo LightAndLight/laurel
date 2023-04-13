@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
-module Dblang.Run.CSV (eval, Error (..), pretty) where
+module Dblang.CSV.Run (eval, Error (..), pretty) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)

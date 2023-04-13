@@ -1,4 +1,4 @@
-module Test.Dblang.Compile.Postgres (spec) where
+module Test.Dblang.Postgres.Compile (spec) where
 
 import Bound (Var (..), toScope)
 import Data.Foldable (for_)
@@ -8,10 +8,10 @@ import qualified Data.Text.Lazy as Text.Lazy
 import qualified Data.Text.Lazy.Builder as Builder
 import Data.Vector (Vector)
 import Data.Void (Void, absurd)
-import Dblang.Compile.Postgres (compileCommand, compileDefinition, compileQuery)
 import Dblang.Definition (Definition)
 import Dblang.Expr (Expr (..))
 import qualified Dblang.Parse as Parse
+import Dblang.Postgres.Compile (compileCommand, compileDefinition, compileQuery)
 import qualified Dblang.Type as Type
 import qualified Dblang.Typecheck as Typecheck
 import Streaming.Chars.Text (StreamText (..))

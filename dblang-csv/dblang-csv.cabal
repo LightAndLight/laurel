@@ -23,7 +23,7 @@ common extensions
 library
     import:           warnings, extensions
     exposed-modules:
-        Dblang.Run.CSV
+        Dblang.CSV.Run
     build-depends:
         base ^>=4.16.4.0,
         bytestring,

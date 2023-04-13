@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module Dblang.Compile.Postgres (compileDefinition, compileQuery, compileCommand) where
+module Dblang.Postgres.Compile (compileDefinition, compileQuery, compileCommand) where
 
 import Bound (fromScope)
 import Bound.Var (unvar)

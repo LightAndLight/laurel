@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module Dblang.Run.Postgres (eval, define, assume, run, Error (..)) where
+module Dblang.Postgres.Run (eval, define, assume, run, Error (..)) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
@@ -15,11 +15,11 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (absurd)
 import qualified Dblang.Command as Command
-import Dblang.Compile.Postgres (compileCommand, compileDefinition, compileQuery)
 import Dblang.Definition (Definition)
 import qualified Dblang.Definition as Definition
 import Dblang.Definition.Table (Table (..))
 import qualified Dblang.Parse as Parse
+import Dblang.Postgres.Compile (compileCommand, compileDefinition, compileQuery)
 import qualified Dblang.Syntax as Syntax
 import Dblang.Type (Type)
 import qualified Dblang.Type as Type

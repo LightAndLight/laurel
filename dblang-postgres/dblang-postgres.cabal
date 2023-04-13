@@ -23,8 +23,8 @@ common extensions
 library
     import:           warnings, extensions
     exposed-modules:
-        Dblang.Compile.Postgres
-        Dblang.Run.Postgres
+        Dblang.Postgres.Compile
+        Dblang.Postgres.Run
     build-depends:
         base ^>=4.16.4.0,
         bound,
@@ -45,7 +45,7 @@ test-suite dblang-postgres-test
     hs-source-dirs:   test
     main-is:          Main.hs
     other-modules:
-        Test.Dblang.Compile.Postgres
+        Test.Dblang.Postgres.Compile
     build-depends:
         base ^>=4.16.4.0,
         bound,
