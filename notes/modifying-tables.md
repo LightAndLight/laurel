@@ -165,7 +165,7 @@ language.
 repl> :get for person in tables.people yield person.name
 ```
 
-`set` could similarly provide the initial state of all tables, and then replace the contents of the
+<a name="set-command">`set`</a> could similarly provide the initial state of all tables, and then replace the contents of the
 target table with the computed relation. This way it's sort of an in-between of `set` and `modify`:
 
 ```
@@ -248,8 +248,8 @@ deletePerson (people : Relation people.Out) (pets : Relation pets.Out) (id : peo
 repl> :set { people, pets } (deletePerson tables.people tables.pets 22)
 ```
 
-Perhaps each defined query has implicit access to `tables`, which represents the state of the
-database at the time the query was executed:
+<a name="implicit-tables">Perhaps each defined query has implicit access to `tables`, which represents the state of the
+database at the time the query was executed</a>:
 
 ```
 deletePerson (id : people.Id) : { people : Relation people.In, pets : Relation pets.In } =
