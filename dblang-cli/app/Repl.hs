@@ -6,18 +6,24 @@ module Repl (run) where
 
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
+import qualified Data.HashMap.Strict as HashMap
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 import qualified Dblang.CSV.Run as Dblang.Csv.Run
 import qualified Dblang.Eval
 import qualified Dblang.Parse
+import qualified Dblang.Postgres.Run
 import Dblang.Run (Run (..), RunError)
 import qualified Dblang.Run as RunError
 import qualified Dblang.Syntax as Syntax
+import qualified Dblang.Type as Type
 import qualified Dblang.Typecheck as Typecheck
+import qualified Dblang.Value as Value
 import Dblang.Value.Pretty (pretty)
+import qualified Hasql.Connection as Postgres
 import qualified Pretty
 import Streaming (Of (..), Stream, hoist, lift, liftIO)
 import Streaming.Chars.Text (StreamText (..))
@@ -84,8 +90,36 @@ loop adapterRef =
         break ()
       ":connect" : adapter : args -> do
         case adapter of
-          "postgres" -> do
-            Streaming.yield (show (":connect" :: String, adapter, args))
+          "postgres" ->
+            case parse (Dblang.Parse.expr Syntax.Name <* eof) (StreamText . Text.pack $ unwords args) of
+              Left err ->
+                Streaming.yield $ show err <> "\n"
+              Right expr ->
+                case Typecheck.runTypecheck $ Typecheck.checkExpr mempty absurd expr (Type.record [("host", Type.Name "String"), ("database", Type.Name "String")]) of
+                  Left err ->
+                    Streaming.yield $ show err <> "\n"
+                  Right core -> do
+                    value <- Dblang.Eval.eval mempty absurd core
+                    case value of
+                      Value.Record fields
+                        | Just (Value.String host) <- fields HashMap.!? "host"
+                        , Just (Value.String database) <- fields HashMap.!? "database" ->
+                            do
+                              result <-
+                                liftIO . Postgres.acquire $
+                                  Postgres.settings
+                                    (Text.Encoding.encodeUtf8 host)
+                                    5432
+                                    ""
+                                    ""
+                                    (Text.Encoding.encodeUtf8 database)
+                              case result of
+                                Left err ->
+                                  Streaming.yield $ show err <> "\n"
+                                Right connection -> do
+                                  lift . writeIORef adapterRef $ Dblang.Postgres.Run.mkRun connection mempty
+                                  Streaming.yield "connected\n"
+                      _ -> undefined
           "csv" -> do
             lift . writeIORef adapterRef $ Dblang.Csv.Run.mkRun (Vector.fromList args)
             Streaming.yield "connected\n"
@@ -102,7 +136,7 @@ loop adapterRef =
             Streaming.yield $ Text.unpack (Pretty.unlines $ pretty value ty) <> "\n"
         continue inputs'
  where
-  go :: Monad m => (forall x. (s -> m x) -> (a -> m x) -> s -> m x) -> s -> m a
+  go :: Applicative m => (forall x. (s -> m x) -> (a -> m x) -> s -> m x) -> s -> m a
   go f = f (go f) pure
 
 readLine ::
