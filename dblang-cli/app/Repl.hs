@@ -1,16 +1,26 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Repl (run) where
 
+import Control.Monad.Error.Class (throwError)
+import Control.Monad.Except (runExceptT)
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as Text
 import qualified Data.Vector as Vector
+import Data.Void (Void, absurd)
 import qualified Dblang.CSV.Run as Dblang.Csv.Run
-import Dblang.Run (Run (..))
+import qualified Dblang.Eval
+import qualified Dblang.Parse
+import Dblang.Run (Run (..), RunError)
+import qualified Dblang.Run as RunError
+import qualified Dblang.Syntax as Syntax
+import qualified Dblang.Typecheck as Typecheck
 import Dblang.Value.Pretty (pretty)
 import qualified Pretty
 import Streaming (Of (..), Stream, hoist, lift, liftIO)
+import Streaming.Chars.Text (StreamText (..))
 import qualified Streaming.Prelude as Streaming
 import qualified System.Console.ANSI as Terminal
 import System.IO (
@@ -23,24 +33,48 @@ import System.IO (
   hSetBuffering,
   hSetEcho,
  )
+import Text.Parser.Combinators (eof)
+import Text.Sage (parse)
 import Prelude hiding (break)
+
+mkRun :: Run IO
+mkRun =
+  Run
+    { eval =
+        \input ->
+          runExceptT @(RunError Void) $ do
+            syntax <-
+              either (throwError . RunError.ParseError) pure $
+                parse (Dblang.Parse.expr Syntax.Name <* eof) (StreamText input)
+
+            (core, ty) <-
+              either (throwError . RunError.TypeError) pure . Typecheck.runTypecheck $ do
+                ty <- Typecheck.unknown
+                core <- Typecheck.checkExpr mempty absurd syntax ty
+                (,)
+                  <$> Typecheck.zonkExpr core
+                  <*> Typecheck.zonk ty
+
+            value <- Dblang.Eval.eval mempty absurd core
+            pure (value, ty)
+    }
 
 run :: Handle -> Handle -> IO ()
 run inputHandle outputHandle = do
   hSetEcho inputHandle False
   hSetBuffering inputHandle NoBuffering
 
-  adapterRef <- newIORef Nothing
+  adapterRef <- newIORef mkRun
   outputs <- repl adapterRef <$> terminalInputs inputHandle
 
   Streaming.mapM_ (\content -> hPutStr outputHandle content *> hFlush outputHandle) outputs
 
-repl :: IORef (Maybe (Run IO)) -> Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
+repl :: IORef (Run IO) -> Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
 repl adapterRef inputs = do
   Streaming.yield "Welcome to the dblang REPL. Type :quit to exit.\n"
   loop adapterRef inputs
 
-loop :: IORef (Maybe (Run IO)) -> Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
+loop :: IORef (Run IO) -> Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
 loop adapterRef =
   go $ \continue break inputs -> do
     Streaming.yield "> "
@@ -53,23 +87,19 @@ loop adapterRef =
           "postgres" -> do
             Streaming.yield (show (":connect" :: String, adapter, args))
           "csv" -> do
-            lift $ writeIORef adapterRef . Just $ Dblang.Csv.Run.mkRun (Vector.fromList args)
+            lift . writeIORef adapterRef $ Dblang.Csv.Run.mkRun (Vector.fromList args)
             Streaming.yield "connected\n"
           _ -> do
             Streaming.yield (show ("error: unknown adapter " <> show adapter))
         continue inputs'
       _ -> do
-        mAdapter <- lift $ readIORef adapterRef
-        case mAdapter of
-          Nothing ->
-            Streaming.yield "error: no connection found\n"
-          Just Run{eval} -> do
-            result <- lift . eval $ Text.pack line
-            case result of
-              Left err ->
-                Streaming.yield $ show err <> "\n"
-              Right (value, ty) ->
-                Streaming.yield $ Text.unpack (Pretty.unlines $ pretty value ty) <> "\n"
+        Run{eval} <- lift $ readIORef adapterRef
+        result <- lift . eval $ Text.pack line
+        case result of
+          Left err ->
+            Streaming.yield $ show err <> "\n"
+          Right (value, ty) ->
+            Streaming.yield $ Text.unpack (Pretty.unlines $ pretty value ty) <> "\n"
         continue inputs'
  where
   go :: Monad m => (forall x. (s -> m x) -> (a -> m x) -> s -> m x) -> s -> m a

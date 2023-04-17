@@ -31,7 +31,10 @@ executable dblang
         dblang,
         dblang-csv,
         dblang-postgres,
+        mtl,
         optparse-applicative,
+        parsers,
+        sage,
         streaming,
         text >=2.0,
         vector
