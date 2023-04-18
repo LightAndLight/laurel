@@ -30,8 +30,8 @@ idStyle :: CharParsing m => Text.Parser.Token.IdentifierStyle m
 idStyle =
   Text.Parser.Token.IdentifierStyle
     { _styleName = "identifier"
-    , _styleStart = lower
-    , _styleLetter = alphaNum
+    , _styleStart = lower <|> char '_'
+    , _styleLetter = alphaNum <|> char '_'
     , _styleReserved = ["for", "where", "in", "yield", "group", "by", "true", "false", "table"]
     , _styleHighlight = Text.Parser.Token.Highlight.Identifier
     , _styleReservedHighlight = Text.Parser.Token.Highlight.ReservedIdentifier

@@ -39,6 +39,8 @@ eval context varValue expr =
       case HashMap.lookup name context of
         Just value -> pure value
         Nothing -> error $ "name " <> show name <> " not in scope"
+    Ctor name args -> do
+      Value.Ctor name <$> traverse (eval context varValue) args
     Var var ->
       pure $ varValue var
     Lam _ body ->

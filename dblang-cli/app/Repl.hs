@@ -22,7 +22,7 @@ import qualified Dblang.Syntax as Syntax
 import qualified Dblang.Type as Type
 import qualified Dblang.Typecheck as Typecheck
 import qualified Dblang.Value as Value
-import Dblang.Value.Pretty (pretty)
+import Dblang.Value.Pretty (pretty, prettyType)
 import qualified Hasql.Connection as Postgres
 import qualified Pretty
 import Streaming (Of (..), Stream, hoist, lift, liftIO)
@@ -63,6 +63,17 @@ mkRun =
 
             value <- Dblang.Eval.eval mempty absurd core
             pure (value, ty)
+    , typeOf =
+        \input ->
+          runExceptT @(RunError Void) $ do
+            syntax <-
+              either (throwError . RunError.ParseError) pure $
+                parse (Dblang.Parse.expr Syntax.Name <* eof) (StreamText input)
+
+            either (throwError . RunError.TypeError) pure . Typecheck.runTypecheck $ do
+              ty <- Typecheck.unknown
+              _core <- Typecheck.checkExpr mempty absurd syntax ty
+              Typecheck.zonk ty
     }
 
 run :: Handle -> Handle -> IO ()
@@ -117,7 +128,9 @@ loop adapterRef =
                                 Left err ->
                                   Streaming.yield $ show err <> "\n"
                                 Right connection -> do
-                                  lift . writeIORef adapterRef $ Dblang.Postgres.Run.mkRun connection mempty
+                                  liftIO $
+                                    writeIORef adapterRef
+                                      =<< Dblang.Postgres.Run.mkRun connection
                                   Streaming.yield "connected\n"
                       _ -> undefined
           "csv" -> do
@@ -125,6 +138,15 @@ loop adapterRef =
             Streaming.yield "connected\n"
           _ -> do
             Streaming.yield (show ("error: unknown adapter " <> show adapter))
+        continue inputs'
+      ":type" : args -> do
+        Run{typeOf} <- lift $ readIORef adapterRef
+        result <- lift . typeOf $ Text.pack (unwords args)
+        case result of
+          Left err ->
+            Streaming.yield $ show err <> "\n"
+          Right ty ->
+            Streaming.yield $ Text.unpack (prettyType ty) <> "\n"
         continue inputs'
       _ -> do
         Run{eval} <- lift $ readIORef adapterRef

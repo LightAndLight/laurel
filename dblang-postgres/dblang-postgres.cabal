@@ -28,9 +28,12 @@ library
     build-depends:
         base ^>=4.16.4.0,
         bound,
+        -- for use with hasql
+        contravariant,
         dblang,
         hasql,
         mtl,
+        parsers,
         sage,
         text >=2.0,
         unordered-containers,

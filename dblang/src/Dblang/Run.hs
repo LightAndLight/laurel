@@ -18,4 +18,5 @@ data Run m = forall e.
   Show e =>
   Run
   { eval :: Text -> m (Either (RunError e) (Value, Type))
+  , typeOf :: Text -> m (Either (RunError e) Type)
   }

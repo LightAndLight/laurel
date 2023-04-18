@@ -34,6 +34,7 @@ data Value
   | String Text
   | Unit
   | Lam Int (Scope Int Expr Value)
+  | Ctor Text (Vector Value)
   deriving (Eq, Show, Generic)
 
 instance Hashable Value

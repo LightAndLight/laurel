@@ -22,6 +22,7 @@ import Text.Show.Deriving (deriveShow1)
 data Expr a
   = Name Text
   | Var a
+  | Ctor Text (Vector (Expr a))
   | Lam Text (Scope () Expr a)
   | App (Expr a) (Expr a)
   | -- | `r.x`
@@ -50,6 +51,7 @@ instance Applicative Expr where
 instance Monad Expr where
   Name name >>= _ = Name name
   Var a >>= f = f a
+  Ctor name arg >>= f = Ctor name (fmap (>>= f) arg)
   Lam name body >>= f = Lam name (body >>>= f)
   App a b >>= f = App (a >>= f) (b >>= f)
   Dot a b >>= f = Dot (a >>= f) b

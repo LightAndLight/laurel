@@ -1,6 +1,14 @@
 {-# LANGUAGE DeriveGeneric #-}
 
-module Dblang.Type (Type (..), arrow, matchArrow, record, matchRecord, matchRow, replaceDefinitions) where
+module Dblang.Type (
+  Type (..),
+  arrow,
+  matchArrow,
+  record,
+  matchRecord,
+  matchRow,
+  replaceDefinitions,
+) where
 
 import Data.Bifunctor (first)
 import Data.HashMap.Strict (HashMap)

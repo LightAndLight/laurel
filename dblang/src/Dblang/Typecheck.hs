@@ -18,7 +18,7 @@ module Dblang.Typecheck (
 import Bound (fromScope, toScope)
 import Bound.Scope (transverseScope)
 import Bound.Var (unvar)
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.State.Strict (StateT, evalStateT, get, gets, modify, put, runStateT)
 import Control.Monad.Trans (lift)
@@ -54,6 +54,7 @@ data Error
   | NotAField {expr :: Syntax.Expr Void, table :: Text}
   | IncorrectConstraintArguments {expectedArguments :: Int, actualArguments :: [Syntax.Expr Void]}
   | NotATable {table :: Text}
+  | IncorrectConstructorArguments {expectedArgumentCount :: Int, actualArgumentCount :: Int}
   deriving (Eq, Show)
 
 newtype Typecheck a = Typecheck (StateT (HashMap Int (Maybe Type)) (Either Error) a)
@@ -106,6 +107,8 @@ zonkExpr expr =
       pure expr
     Expr.Name{} ->
       pure expr
+    Expr.Ctor name args ->
+      Expr.Ctor name <$> traverse zonkExpr args
     Expr.Int{} ->
       pure expr
     Expr.Bool{} ->
@@ -402,6 +405,23 @@ checkExpr nameTypes varType expr expectedTy =
           Name name <$ unify expectedTy actualTy
     Syntax.Var var ->
       Var var <$ unify expectedTy (varType var)
+    Syntax.Ctor "None" args -> do
+      unless (null args)
+        . throwError
+        $ IncorrectConstructorArguments{expectedArgumentCount = 0, actualArgumentCount = length args}
+      innerTy <- unknown
+      unify expectedTy (Type.App (Type.Name "Optional") innerTy)
+      pure (Ctor "None" [])
+    Syntax.Ctor "Some" args -> do
+      case args of
+        [arg] -> do
+          innerTy <- unknown
+          unify expectedTy (Type.App (Type.Name "Optional") innerTy)
+          arg' <- checkExpr nameTypes varType arg innerTy
+          pure (Ctor "Some" [arg'])
+        _ -> throwError $ IncorrectConstructorArguments{expectedArgumentCount = 1, actualArgumentCount = length args}
+    Syntax.Ctor name _arg ->
+      error $ "TODO: type check Ctor " <> show name
     Syntax.Lam name body -> do
       inTy <- unknown
       outTy <- unknown

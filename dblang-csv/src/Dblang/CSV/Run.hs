@@ -39,7 +39,11 @@ import Text.Parser.Combinators (eof)
 import Text.Sage (parse)
 
 mkRun :: MonadIO m => Vector FilePath -> Run m
-mkRun files = Run{eval = eval files}
+mkRun files =
+  Run
+    { eval = eval files
+    , typeOf = typeOf files
+    }
 
 data CsvError
   = CsvError String
@@ -146,3 +150,52 @@ pretty result =
         print err
       Right (value, ty) ->
         Text.IO.putStrLn . Pretty.unlines $ Value.Pretty.pretty value ty
+
+typeOf ::
+  MonadIO m =>
+  Vector FilePath ->
+  Text ->
+  m (Either (RunError CsvError) Type)
+typeOf files input =
+  runExceptT $ do
+    tablesType <- do
+      definitions <- for files $ \file -> do
+        contents <- liftIO $ ByteString.Lazy.readFile file
+
+        table :: Vector (Vector Text) <- either (throwError . RunError.OtherError . CsvError) pure $ Csv.decode Csv.NoHeader contents
+        types <- case Vector.uncons table of
+          Nothing ->
+            error $ "table " <> show file <> " missing header"
+          Just (header, _body) ->
+            pure $ fmap (,Type.Name "String") header
+
+        let name = Text.pack $ FilePath.takeBaseName file
+
+        pure
+          ( Definition.Table
+              Table
+                { name
+                , types
+                , inFields = types
+                , outFields = types
+                , constraints = mempty
+                }
+          )
+
+      pure
+        ( Type.record $
+            Vector.mapMaybe
+              ( \case
+                  Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
+              )
+              definitions
+        )
+
+    syntax <-
+      either (throwError . RunError.ParseError) pure $
+        parse (Parse.expr Syntax.Name <* eof) (StreamText input)
+
+    either (throwError . RunError.TypeError) pure . runTypecheck $ do
+      ty <- Typecheck.unknown
+      _core <- checkExpr (HashMap.singleton "tables" tablesType) absurd syntax ty
+      Typecheck.zonk ty

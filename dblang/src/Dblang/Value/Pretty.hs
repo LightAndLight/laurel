@@ -163,7 +163,7 @@ pretty value ty =
                 , Pretty.line "}"
                 ]
         Nothing ->
-          error $ "invalid type for Map: " <> show ty
+          error $ "invalid type for Record: " <> show ty
     Value.Int i ->
       Pretty.line . Text.pack $ show i
     Value.Bool b ->
@@ -174,6 +174,22 @@ pretty value ty =
       Pretty.line "()"
     Value.Lam{} ->
       Pretty.line "<function>"
+    Value.Ctor name args ->
+      horizontally $
+        Pretty.line name
+          <> ( case ty of
+                Type.App (Type.Name "Optional") argTy
+                  | "Some" <- name
+                  , [arg] <- args ->
+                      Pretty.line "("
+                        <> pretty arg argTy
+                        <> Pretty.line ")"
+                  | "None" <- name
+                  , [] <- args ->
+                      mempty
+                _ ->
+                  error $ "invalid type for Ctor: " <> show ty
+             )
  where
   prettyField :: IsLines lines => HashMap Text Value -> Text -> Type -> lines
   prettyField fields fieldName fieldType =

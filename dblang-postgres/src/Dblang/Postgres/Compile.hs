@@ -234,6 +234,8 @@ compileRelation varInfo expr =
     -- name : Relation a
     Expr.Name{} ->
       error "TODO: compileRelation Name"
+    Expr.Ctor{} ->
+      error "TODO: compileRelation Ctor"
     -- f x_1 x_2 ... x_n : Relation a
     Expr.App{} ->
       error "TODO: compileRelation App"
@@ -302,6 +304,8 @@ compileQuery varInfo expr =
       error "TODO: compileExpr Var"
     Expr.Name name ->
       Builder.fromText name
+    Expr.Ctor{} ->
+      error "TODO: compileExpr Ctor"
     Expr.Lam{} ->
       error "TODO: compileExpr Lam"
     Expr.Yield{} ->
@@ -360,6 +364,8 @@ compileSelectList varInfo expr =
               error "variable has unknown type"
             _ ->
               Builder.fromText info.name
+    Expr.Ctor{} ->
+      error "TODO: compileSelectList Ctor"
     Expr.Lam{} ->
       error "TODO: compileSelectList Lam"
     Expr.Yield{} ->
@@ -403,6 +409,8 @@ compileExpr varInfo expr =
       Builder.fromText (varInfo var).name
     Expr.Name name ->
       Builder.fromText name
+    Expr.Ctor{} ->
+      error "TODO: compileExpr Ctor"
     Expr.Lam{} ->
       error "TODO: compileExpr Lam"
     Expr.Yield{} ->

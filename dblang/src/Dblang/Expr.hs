@@ -22,6 +22,7 @@ import Data.Vector.Instances ()
 data Expr a
   = Name Text
   | Var a
+  | Ctor Text (Vector (Expr a))
   | Lam Text (Scope () Expr a)
   | -- | `f x`
     App Type (Expr a) (Vector (Expr a))
@@ -48,6 +49,7 @@ instance Applicative Expr where
 
 instance Monad Expr where
   Name name >>= _ = Name name
+  Ctor name args >>= f = Ctor name (fmap (>>= f) args)
   Var a >>= f = f a
   Lam name body >>= f = Lam name (body >>>= f)
   App t a b >>= f = App t (a >>= f) (fmap (>>= f) b)
@@ -76,6 +78,8 @@ typeOf varType expr =
   case expr of
     Name{} ->
       error "TODO: typeOf: Name"
+    Ctor{} ->
+      error "TODO: typeOf: Ctor"
     Var var ->
       varType var
     Lam{} ->
