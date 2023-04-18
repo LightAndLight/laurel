@@ -46,7 +46,7 @@ I chose the word "connect" because I imagined using the same command to connect 
 Something like `:connect postgres { host = "localhost", port = 5432, database = "test" }`. I'm
 wondering whether this action should also infer types for the database's tables.
 
-> ℹ Improvement (tentative): infer table types for Postgres connection
+> ℹ Improvement (tentative): infer table types for Postgres connection ([continued here](./extracting-types-from-information-schema.md))
 
 How do I modify tables? The `tables` variable comes from <modifying-tables.md#implicit-tables>, and
 it works fine with the "multiple data source" approach I've stumbled across. But the [`set`
