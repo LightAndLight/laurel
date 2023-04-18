@@ -13,6 +13,7 @@ import qualified Data.Text.Encoding as Text.Encoding
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 import qualified Dblang.CSV.Run as Dblang.Csv.Run
+import Dblang.Definition.Pretty (prettyDefinition)
 import qualified Dblang.Eval
 import qualified Dblang.Parse
 import qualified Dblang.Postgres.Run
@@ -74,6 +75,8 @@ mkRun =
               ty <- Typecheck.unknown
               _core <- Typecheck.checkExpr mempty absurd syntax ty
               Typecheck.zonk ty
+    , definitions =
+        pure mempty
     }
 
 run :: Handle -> Handle -> IO ()
@@ -134,10 +137,15 @@ loop adapterRef =
                                   Streaming.yield "connected\n"
                       _ -> undefined
           "csv" -> do
-            lift . writeIORef adapterRef $ Dblang.Csv.Run.mkRun (Vector.fromList args)
-            Streaming.yield "connected\n"
+            result <- liftIO $ Dblang.Csv.Run.mkRun (Vector.fromList args)
+            case result of
+              Left err ->
+                Streaming.yield $ show err <> "\n"
+              Right newAdapter -> do
+                liftIO $ writeIORef adapterRef newAdapter
+                Streaming.yield "connected\n"
           _ -> do
-            Streaming.yield (show ("error: unknown adapter " <> show adapter))
+            Streaming.yield $ show ("error: unknown adapter " <> show adapter) <> "\n"
         continue inputs'
       ":type" : args -> do
         Run{typeOf} <- lift $ readIORef adapterRef
@@ -147,6 +155,18 @@ loop adapterRef =
             Streaming.yield $ show err <> "\n"
           Right ty ->
             Streaming.yield $ Text.unpack (prettyType ty) <> "\n"
+        continue inputs'
+      [":tables"] -> do
+        Run{definitions = getDefinitions} <- liftIO $ readIORef adapterRef
+        definitions <- liftIO getDefinitions
+        Streaming.yield $
+          Text.unpack
+            ( Pretty.unlines . Pretty.vertically $
+                Pretty.sepBy
+                  (fmap prettyDefinition definitions)
+                  (Pretty.line "")
+            )
+            <> "\n"
         continue inputs'
       _ -> do
         Run{eval} <- lift $ readIORef adapterRef

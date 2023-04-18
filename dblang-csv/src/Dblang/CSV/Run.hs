@@ -18,6 +18,7 @@ import Data.Traversable (for)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (absurd)
+import Dblang.Definition (Definition)
 import qualified Dblang.Definition as Definition
 import Dblang.Definition.Table (Table (..))
 import qualified Dblang.Eval
@@ -38,16 +39,57 @@ import qualified System.FilePath as FilePath
 import Text.Parser.Combinators (eof)
 import Text.Sage (parse)
 
-mkRun :: MonadIO m => Vector FilePath -> Run m
-mkRun files =
-  Run
-    { eval = eval files
-    , typeOf = typeOf files
-    }
-
 data CsvError
   = CsvError String
   deriving (Eq, Show)
+
+mkRun :: MonadIO m => Vector FilePath -> IO (Either (RunError CsvError) (Run m))
+mkRun files =
+  runExceptT $ do
+    (definitions, context) <- fmap Vector.unzip . for files $ \file -> do
+      contents <- liftIO $ ByteString.Lazy.readFile file
+
+      table :: Vector (Vector Text) <- either (throwError . RunError.OtherError . CsvError) pure $ Csv.decode Csv.NoHeader contents
+      (types, body) <- case Vector.uncons table of
+        Nothing ->
+          error $ "table " <> show file <> " missing header"
+        Just (header, body) ->
+          pure (fmap (,Type.Name "String") header, body)
+
+      let name = Text.pack $ FilePath.takeBaseName file
+
+      pure
+        ( Definition.Table
+            Table
+              { name
+              , types
+              , inFields = types
+              , outFields = types
+              , constraints = mempty
+              }
+        ,
+          ( name
+          , Value.Relation . Value.fromVector $
+              let typesLength = length types
+               in fmap
+                    ( \row ->
+                        let rowLength = length row
+                         in Value.Record
+                              . foldl' (\acc (key, value) -> HashMap.insert key value acc) mempty
+                              $ Vector.zipWith
+                                (\(field, _ty) value -> (field, Value.String value))
+                                types
+                                (if rowLength < typesLength then row <> Vector.replicate (typesLength - rowLength) "" else row)
+                    )
+                    body
+          )
+        )
+    pure
+      Run
+        { eval = eval definitions context
+        , typeOf = typeOf definitions
+        , definitions = pure definitions
+        }
 
 {- | Run a query against a set of CSV files.
 
@@ -72,60 +114,22 @@ table example {
 -}
 eval ::
   MonadIO m =>
-  Vector FilePath ->
+  Vector Definition ->
+  Vector (Text, Value) ->
   Text ->
   m (Either (RunError CsvError) (Value, Type))
-eval files input =
+eval definitions context input =
   runExceptT $ do
-    (tablesType, tablesValue) <- do
-      (definitions, context) <- fmap Vector.unzip . for files $ \file -> do
-        contents <- liftIO $ ByteString.Lazy.readFile file
-
-        table :: Vector (Vector Text) <- either (throwError . RunError.OtherError . CsvError) pure $ Csv.decode Csv.NoHeader contents
-        (types, body) <- case Vector.uncons table of
-          Nothing ->
-            error $ "table " <> show file <> " missing header"
-          Just (header, body) ->
-            pure (fmap (,Type.Name "String") header, body)
-
-        let name = Text.pack $ FilePath.takeBaseName file
-
-        pure
-          ( Definition.Table
-              Table
-                { name
-                , types
-                , inFields = types
-                , outFields = types
-                , constraints = mempty
-                }
-          ,
-            ( name
-            , Value.Relation . Value.fromVector $
-                let typesLength = length types
-                 in fmap
-                      ( \row ->
-                          let rowLength = length row
-                           in Value.Record
-                                . foldl' (\acc (key, value) -> HashMap.insert key value acc) mempty
-                                $ Vector.zipWith
-                                  (\(field, _ty) value -> (field, Value.String value))
-                                  types
-                                  (if rowLength < typesLength then row <> Vector.replicate (typesLength - rowLength) "" else row)
-                      )
-                      body
-            )
-          )
-
-      pure
-        ( Type.record $
+    let tablesType =
+          Type.record $
             Vector.mapMaybe
               ( \case
                   Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
               )
               definitions
-        , Value.Record $ foldl' (\acc (key, value) -> HashMap.insert key value acc) mempty context
-        )
+
+    let tablesValue =
+          Value.Record $ foldl' (\acc (key, value) -> HashMap.insert key value acc) mempty context
 
     syntax <-
       either (throwError . RunError.ParseError) pure $
@@ -153,43 +157,18 @@ pretty result =
 
 typeOf ::
   MonadIO m =>
-  Vector FilePath ->
+  Vector Definition ->
   Text ->
   m (Either (RunError CsvError) Type)
-typeOf files input =
+typeOf definitions input =
   runExceptT $ do
-    tablesType <- do
-      definitions <- for files $ \file -> do
-        contents <- liftIO $ ByteString.Lazy.readFile file
-
-        table :: Vector (Vector Text) <- either (throwError . RunError.OtherError . CsvError) pure $ Csv.decode Csv.NoHeader contents
-        types <- case Vector.uncons table of
-          Nothing ->
-            error $ "table " <> show file <> " missing header"
-          Just (header, _body) ->
-            pure $ fmap (,Type.Name "String") header
-
-        let name = Text.pack $ FilePath.takeBaseName file
-
-        pure
-          ( Definition.Table
-              Table
-                { name
-                , types
-                , inFields = types
-                , outFields = types
-                , constraints = mempty
-                }
-          )
-
-      pure
-        ( Type.record $
+    let tablesType =
+          Type.record $
             Vector.mapMaybe
               ( \case
                   Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
               )
               definitions
-        )
 
     syntax <-
       either (throwError . RunError.ParseError) pure $

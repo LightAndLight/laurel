@@ -27,7 +27,10 @@ library
         Dblang.Definition
         Dblang.Definition.Constraint
         Dblang.Definition.Table
+        Dblang.Definition.Table.Pretty
+        Dblang.Definition.Pretty
         Dblang.Expr
+        Dblang.Expr.Pretty
         Dblang.Eval
         Dblang.Parse
         Dblang.Run
@@ -48,8 +51,8 @@ library
         mtl,
         unordered-containers,
         parsers,
-        text >=2.0,
         sage,
+        text >=2.0,
         vector,
         -- instance Hashable a => Hashable (Vector a)
         vector-instances

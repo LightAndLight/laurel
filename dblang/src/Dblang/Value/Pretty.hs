@@ -144,7 +144,7 @@ pretty value ty =
                         Pretty.vertically
                           ( foldMap
                               ( \(fieldName', fieldType') ->
-                                  prettyField fields fieldName' fieldType' `Pretty.append` ","
+                                  prettyField fields fieldName' fieldType' `Pretty.append` Pretty.line ","
                               )
                               rest
                           )

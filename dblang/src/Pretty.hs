@@ -26,6 +26,11 @@ module Pretty (
   Vertically (..),
   vertically,
   vfold,
+
+  -- * End-to-end composition
+  EndToEnd (..),
+  endToEnd,
+  efold,
 ) where
 
 import Data.Foldable (foldl', toList)
@@ -52,6 +57,10 @@ class IsLines lines where
   --   `height (line l) == 1`
   --   `line (a <> b) == line a `hcat` line b`
   line :: Text -> lines
+
+  -- | `width newline == 0`
+  --   `height newline == 2`
+  newline :: lines
 
   -- | `width (hcat a b) == width a + width b`
   --   `height (hcat a b) == max (height a) (height b)`
@@ -92,6 +101,9 @@ instance IsLines Lines where
   line :: Text -> Lines
   line = Lines . pure
 
+  newline :: Lines
+  newline = Lines ["", ""]
+
   width :: Lines -> Int
   width (Lines ls) = foldl' max 0 (fmap Text.length ls)
 
@@ -129,8 +141,19 @@ instance IsLines Lines where
     go _ [] = error $ "offset " <> show offset <> " was greater than " <> show (height a)
     go n (l : ls) = l : go (n - 1) ls
 
-append :: IsLines lines => lines -> Text -> lines
-append ls value = mapSlice (height ls - 1) 1 (`hcat` line value) ls
+append :: IsLines lines => lines -> lines -> lines
+append ls new
+  | height new == 0 = ls
+  | otherwise =
+      let lsHeight = height ls
+       in if lsHeight == 0
+            then new
+            else
+              mapSlice
+                (lsHeight - 1)
+                1
+                (substLines (\oldLine -> mapSlice 0 1 (substLines (\newLine -> line $ oldLine <> newLine)) new))
+                ls
 
 indent :: IsLines lines => Int -> lines -> lines
 indent n lines =
@@ -183,7 +206,7 @@ newtype Vertically lines = Vertically lines
 vertically :: Vertically lines -> lines
 vertically (Vertically ls) = ls
 
--- | `vfold = vorizontally . foldMap Vorizontally`
+-- | `vfold = vertically . foldMap Vertically`
 vfold :: (Foldable f, IsLines lines) => f lines -> lines
 vfold = vertically . foldMap Vertically
 
@@ -200,3 +223,19 @@ sepBy ms sep =
       mempty
     m : rest ->
       m <> foldMap (sep <>) rest
+
+newtype EndToEnd lines = EndToEnd lines
+  deriving (IsLines, IsString)
+
+endToEnd :: EndToEnd lines -> lines
+endToEnd (EndToEnd ls) = ls
+
+-- | `efold = endToEnd . foldMap EndToEnd`
+efold :: (Foldable f, IsLines lines) => f lines -> lines
+efold = endToEnd . foldMap EndToEnd
+
+instance IsLines lines => Semigroup (EndToEnd lines) where
+  EndToEnd a <> EndToEnd b = EndToEnd (append a b)
+
+instance IsLines lines => Monoid (EndToEnd lines) where
+  mempty = EndToEnd empty

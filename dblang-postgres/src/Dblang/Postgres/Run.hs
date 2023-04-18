@@ -221,6 +221,7 @@ mkRun conn = do
         Run
           { eval = eval conn definitions
           , typeOf = typeOf definitions
+          , definitions = pure definitions
           }
 
 maybeToValue :: Maybe Value -> Value
