@@ -29,7 +29,7 @@ library
         bytestring,
         cassava,
         filepath,
-        laurel,
+        laurel-core,
         mtl,
         parsers,
         sage,

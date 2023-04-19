@@ -1,5 +1,5 @@
 cabal-version:      3.0
-name:               laurel
+name:               laurel-core
 version:            0.1.0.0
 license:            BSD-3-Clause
 license-file:       LICENSE
@@ -71,8 +71,8 @@ test-suite laurel-test
     build-depends:
         base ^>=4.16.4.0,
         bound,
-        laurel,
         hspec,
+        laurel-core,
         sage,
         text,
         vector

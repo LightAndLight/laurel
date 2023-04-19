@@ -28,10 +28,10 @@ executable laurel
     build-depends:
         base ^>=4.16.4.0,
         ansi-terminal,
-        laurel,
+        hasql,
+        laurel-core,
         laurel-csv,
         laurel-postgres,
-        hasql,
         mtl,
         optparse-applicative,
         parsers,

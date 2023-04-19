@@ -30,8 +30,8 @@ library
         bound,
         -- for use with hasql
         contravariant,
-        laurel,
         hasql,
+        laurel-core,
         mtl,
         parsers,
         sage,
@@ -52,9 +52,9 @@ test-suite laurel-postgres-test
     build-depends:
         base ^>=4.16.4.0,
         bound,
-        laurel,
-        laurel-postgres,
         hspec,
+        laurel-core,
+        laurel-postgres,
         sage,
         text,
         vector

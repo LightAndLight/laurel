@@ -1,6 +1,6 @@
 packages: 
-  ./laurel
   ./laurel-cli
+  ./laurel-core
   ./laurel-csv
   ./laurel-postgres
 
