@@ -131,3 +131,5 @@ eval context varValue expr =
       a' <- eval context varValue a
       b' <- eval context varValue b
       valueEq a' b'
+    List items ->
+      Value.List <$> traverse (eval context varValue) items

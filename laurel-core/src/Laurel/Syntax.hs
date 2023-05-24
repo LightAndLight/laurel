@@ -42,6 +42,7 @@ data Expr a
   | Int Int
   | Bool Bool
   | String Text
+  | List (Vector (Expr a))
   deriving (Functor, Foldable, Traversable)
 
 instance Applicative Expr where
@@ -65,6 +66,7 @@ instance Monad Expr where
   Int i >>= _ = Int i
   Bool b >>= _ = Bool b
   String s >>= _ = String s
+  List items >>= f = List $ fmap (>>= f) items
 
 deriveEq1 ''Expr
 deriveShow1 ''Expr

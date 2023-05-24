@@ -114,6 +114,39 @@ pretty value ty =
                   }
         _ ->
           error $ "invalid type for Relation: " <> show ty
+    Value.List values ->
+      case ty of
+        Type.App (Type.Name "List") itemType ->
+          case Type.matchRecord itemType of
+            Just tyFields ->
+              prettyTable
+                Table
+                  { header = fmap (\(fieldName, fieldType) -> fieldName <> " : " <> prettyType fieldType) tyFields
+                  , body =
+                      ( \case
+                          Value.Record fields ->
+                            fmap
+                              ( \(fieldName, fieldType) ->
+                                  pretty
+                                    ( Maybe.fromMaybe
+                                        (error $ "field " <> show fieldName <> " missing from " <> show fields)
+                                        (HashMap.lookup fieldName fields)
+                                    )
+                                    fieldType
+                              )
+                              tyFields
+                          value' -> error $ "expected record, got " <> show value'
+                      )
+                        <$> values
+                  }
+            Nothing ->
+              prettyTable
+                Table
+                  { header = ["_ : " <> prettyType itemType]
+                  , body = (\value' -> [pretty value' itemType]) <$> values
+                  }
+        _ ->
+          error $ "invalid type for List: " <> show ty
     Value.Map values ->
       case ty of
         Type.App (Type.App (Type.Name "Map") keyType) valueType ->

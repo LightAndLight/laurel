@@ -21,6 +21,17 @@ import Data.Traversable (for)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
+import Hasql.Connection (Connection)
+import Hasql.Decoders (Result, Row)
+import qualified Hasql.Decoders as Decode
+import qualified Hasql.Decoders as Decoder
+import Hasql.Encoders (noParams)
+import qualified Hasql.Encoders as Encoder
+import qualified Hasql.Encoders as Postgres (noParams)
+import Hasql.Session (QueryError)
+import qualified Hasql.Session as Postgres (run, sql, statement)
+import Hasql.Statement (Statement (..))
+import Hasql.Statement as Postgres (Statement (..), refineResult)
 import qualified Laurel.Command as Command
 import Laurel.Definition (Definition)
 import qualified Laurel.Definition as Definition
@@ -38,17 +49,6 @@ import Laurel.Typecheck (checkDefinition, checkExpr, runTypecheck)
 import qualified Laurel.Typecheck as Typecheck
 import Laurel.Value (Value (..))
 import qualified Laurel.Value as Value
-import Hasql.Connection (Connection)
-import Hasql.Decoders (Result, Row)
-import qualified Hasql.Decoders as Decode
-import qualified Hasql.Decoders as Decoder
-import Hasql.Encoders (noParams)
-import qualified Hasql.Encoders as Encoder
-import qualified Hasql.Encoders as Postgres (noParams)
-import Hasql.Session (QueryError)
-import qualified Hasql.Session as Postgres (run, sql, statement)
-import Hasql.Statement (Statement (..))
-import Hasql.Statement as Postgres (Statement (..), refineResult)
 import Streaming.Chars (Chars)
 import Streaming.Chars.Text (StreamText (..))
 import Text.Parser.Char (anyChar, char, notChar, string)
@@ -287,6 +287,9 @@ valueDecoder ty =
                     mempty
                     fields
                 )
+    Type.App (Type.Name "List") a ->
+      Right . Decode.nonNullable $
+        Decode.array (Decode.element . Decode.nonNullable $ innerValueDecoder a)
     Type.App (Type.Name "Relation") a ->
       Right . Decode.nonNullable $
         Decode.array (Decode.element . Decode.nonNullable $ innerValueDecoder a)
@@ -316,6 +319,8 @@ innerValueDecoder ty =
                   mempty
                   fields
               )
+    Type.App (Type.Name "List") a ->
+      Decode.array (Decode.element . Decode.nonNullable $ innerValueDecoder a)
     Type.App (Type.Name "Relation") a ->
       Decode.array (Decode.element . Decode.nonNullable $ innerValueDecoder a)
     _ ->

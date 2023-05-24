@@ -48,3 +48,8 @@ prettyExpr prettyVar expr =
         prettyExpr (Horizontally . prettyVar) a
           <> Pretty.line " == "
           <> prettyExpr (Horizontally . prettyVar) b
+    List items ->
+      horizontally $
+        Pretty.sepBy
+          (prettyExpr (Horizontally . prettyVar) <$> items)
+          (Pretty.line ", ")

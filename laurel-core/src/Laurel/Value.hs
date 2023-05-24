@@ -10,8 +10,8 @@ import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable)
 import Data.Text (Text)
 import Data.Vector (Vector)
-import Laurel.Expr (Expr)
 import GHC.Generics (Generic)
+import Laurel.Expr (Expr)
 
 -- instance Hashable a => Hashable (Vector a)
 import Data.Vector.Instances ()
@@ -35,6 +35,7 @@ data Value
   | Unit
   | Lam Int (Scope Int Expr Value)
   | Ctor Text (Vector Value)
+  | List (Vector Value)
   deriving (Eq, Show, Generic)
 
 instance Hashable Value

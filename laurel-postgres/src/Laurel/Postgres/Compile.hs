@@ -295,6 +295,8 @@ compileRelation varInfo expr =
       error "compileRelation: impossible String"
     Expr.GroupBy{} ->
       error "compileRelation: impossible GroupBy"
+    Expr.List{} ->
+      error "compileRelation: impossible List"
 
 -- | Compile an expression of any type to an executable SQL query.
 compileQuery :: (a -> VarInfo) -> Expr a -> Builder
@@ -339,6 +341,8 @@ compileQuery varInfo expr =
     Expr.Bool{} ->
       "VALUES " <> parens (compileExpr varInfo expr)
     Expr.String{} ->
+      "VALUES " <> parens (compileExpr varInfo expr)
+    Expr.List{} ->
       "VALUES " <> parens (compileExpr varInfo expr)
 
 compileFrom :: (a -> VarInfo) -> Expr a -> Builder
@@ -400,6 +404,8 @@ compileSelectList varInfo expr =
       parens (compileExpr varInfo expr) <> " AS it"
     Expr.String{} ->
       parens (compileExpr varInfo expr) <> " AS it"
+    Expr.List{} ->
+      parens (compileExpr varInfo expr) <> " AS it"
 
 -- | Compile an expression to an SQL expression (not a query).
 compileExpr :: (a -> VarInfo) -> Expr a -> Builder
@@ -455,6 +461,8 @@ compileExpr varInfo expr =
       "'" <> foldMap (\c -> if c == '\'' then "''" else Builder.fromText (Text.singleton c)) (Text.unpack s) <> "'"
     Expr.Equals a b ->
       compileExpr varInfo a <> " = " <> compileExpr varInfo b
+    Expr.List items ->
+      "ARRAY[" <> commaSep (fmap (compileExpr varInfo) items) <> "]"
 
 compileTuple :: (a -> VarInfo) -> Expr a -> Builder
 compileTuple varInfo expr =

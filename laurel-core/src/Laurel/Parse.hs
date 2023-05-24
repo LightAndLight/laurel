@@ -154,6 +154,7 @@ exprAtom toVar =
                 <*> optional (symbolic '=' *> expr toVar)
             )
       )
+    <|> brackets (Expr.List . Vector.fromList <$> commaSep (expr toVar))
     <|> parens (expr toVar)
 
 definition :: Chars s => Parser s Definition

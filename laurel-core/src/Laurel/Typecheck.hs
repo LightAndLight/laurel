@@ -135,6 +135,8 @@ zonkExpr expr =
       Expr.Record <$> (traverse . traverse) zonkExpr fields
     Expr.Equals a b ->
       Expr.Equals <$> zonkExpr a <*> zonkExpr b
+    Expr.List items ->
+      Expr.List <$> traverse zonkExpr items
 
 unify :: Type -> Type -> Typecheck ()
 unify expected actual = do
@@ -508,6 +510,10 @@ checkExpr nameTypes varType expr expectedTy =
       Bool b <$ unify expectedTy (Type.Name "Bool")
     Syntax.String s ->
       String s <$ unify expectedTy (Type.Name "String")
+    Syntax.List items -> do
+      t <- unknown
+      unify expectedTy (Type.list t)
+      List <$> traverse (\item -> checkExpr nameTypes varType item t) items
 
 lookupTable :: Vector Definition -> Text -> Maybe Table
 lookupTable definitions name =

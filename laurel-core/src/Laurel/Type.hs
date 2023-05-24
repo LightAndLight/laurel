@@ -2,10 +2,12 @@
 
 module Laurel.Type (
   Type (..),
+  string,
   arrow,
   matchArrow,
   record,
   matchRecord,
+  list,
   matchRow,
   replaceDefinitions,
 ) where
@@ -28,6 +30,9 @@ data Type
   deriving (Eq, Show, Generic)
 
 instance Hashable Type
+
+string :: Type
+string = Name "String"
 
 arrow :: Type -> Type -> Type
 arrow a = App (App (Name "Arrow") a)
@@ -53,6 +58,9 @@ matchRecord type_ =
       RCons name ty fields' -> ((name, ty) :) <$> go fields'
       RNil -> Just []
       _ -> Nothing
+
+list :: Type -> Type
+list = App (Name "List")
 
 matchRow :: Type -> (Vector (Text, Type), Maybe Type)
 matchRow = first Vector.fromList . go

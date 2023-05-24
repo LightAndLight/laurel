@@ -11,9 +11,9 @@ import Data.Eq.Deriving (deriveEq1)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Text (Text)
 import Data.Vector (Vector)
+import GHC.Generics (Generic1)
 import Laurel.Type (Type)
 import qualified Laurel.Type as Type
-import GHC.Generics (Generic1)
 import Text.Show.Deriving (deriveShow1)
 
 -- instance Hashable1 Vector
@@ -41,6 +41,7 @@ data Expr a
   | Bool Bool
   | String Text
   | Equals (Expr a) (Expr a)
+  | List (Vector (Expr a))
   deriving (Functor, Foldable, Traversable, Generic1)
 
 instance Applicative Expr where
@@ -64,6 +65,7 @@ instance Monad Expr where
   Bool b >>= _ = Bool b
   String s >>= _ = String s
   Equals a b >>= f = Equals (a >>= f) (b >>= f)
+  List items >>= f = List $ fmap (>>= f) items
 
 deriveEq1 ''Expr
 deriveShow1 ''Expr
@@ -108,6 +110,8 @@ typeOf varType expr =
       Type.Name "String"
     Equals{} ->
       Type.Name "Bool"
+    List{} ->
+      error "TODO: typeOf: List"
 
 app :: Type -> Expr a -> Expr a -> Expr a
 app _ (Lam _ body) x = instantiate1 x body
