@@ -3,6 +3,7 @@
 module Laurel.Parse (
   definition,
   expr,
+  exprAtom,
   command,
 ) where
 

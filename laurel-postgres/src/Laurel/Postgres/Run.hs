@@ -334,9 +334,9 @@ eval ::
   MonadIO m =>
   Connection ->
   Vector Definition ->
-  Text ->
+  Syntax.Expr Void ->
   m (Either (RunError PostgresError) (Value, Type))
-eval conn definitions input =
+eval conn definitions syntax =
   runExceptT $ do
     let tablesType =
           Type.record $
@@ -345,10 +345,6 @@ eval conn definitions input =
                   Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
               )
               definitions
-
-    syntax <-
-      either (throwError . RunError.ParseError) pure $
-        parse (Parse.expr Syntax.Name) (StreamText input)
 
     (core, ty) <-
       either (throwError . RunError.TypeError) pure . runTypecheck $ do
@@ -460,9 +456,9 @@ run conn definitions input =
 typeOf ::
   MonadIO m =>
   Vector Definition ->
-  Text ->
+  Syntax.Expr Void ->
   m (Either (RunError PostgresError) Type)
-typeOf definitions input =
+typeOf definitions syntax =
   runExceptT $ do
     let tablesType =
           Type.record $
@@ -471,10 +467,6 @@ typeOf definitions input =
                   Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
               )
               definitions
-
-    syntax <-
-      either (throwError . RunError.ParseError) pure $
-        parse (Parse.expr Syntax.Name) (StreamText input)
 
     either (throwError . RunError.TypeError) pure . runTypecheck $ do
       ty <- Typecheck.unknown

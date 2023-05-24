@@ -1,16 +1,19 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Repl (run) where
 
+import Control.Applicative (many, some, (<|>))
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExceptT)
+import Data.Bifunctor (first)
+import qualified Data.CharSet.Common as CharSet
 import qualified Data.HashMap.Strict as HashMap
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text.Encoding
-import qualified Data.Vector as Vector
 import Data.Void (Void, absurd)
 import qualified Hasql.Connection as Postgres
 import qualified Laurel.CSV.Run as Laurel.Csv.Run
@@ -27,6 +30,7 @@ import qualified Laurel.Value as Value
 import Laurel.Value.Pretty (pretty, prettyType)
 import qualified Pretty
 import Streaming (Of (..), Stream, hoist, lift, liftIO)
+import Streaming.Chars (Chars)
 import Streaming.Chars.Text (StreamText (..))
 import qualified Streaming.Prelude as Streaming
 import qualified System.Console.ANSI as Terminal
@@ -40,20 +44,18 @@ import System.IO (
   hSetBuffering,
   hSetEcho,
  )
+import Text.Parser.Char (char, noneOfSet)
 import Text.Parser.Combinators (eof)
-import Text.Sage (parse)
+import Text.Parser.Token (token)
+import Text.Sage (ParseError, Parser, parse)
 import Prelude hiding (break)
 
 mkRun :: Run IO
 mkRun =
   Run
     { eval =
-        \input ->
+        \syntax ->
           runExceptT @(RunError Void) $ do
-            syntax <-
-              either (throwError . RunError.ParseError) pure $
-                parse (Laurel.Parse.expr Syntax.Name <* eof) (StreamText input)
-
             (core, ty) <-
               either (throwError . RunError.TypeError) pure . Typecheck.runTypecheck $ do
                 ty <- Typecheck.unknown
@@ -65,12 +67,8 @@ mkRun =
             value <- Laurel.Eval.eval mempty absurd core
             pure (value, ty)
     , typeOf =
-        \input ->
+        \syntax ->
           runExceptT @(RunError Void) $ do
-            syntax <-
-              either (throwError . RunError.ParseError) pure $
-                parse (Laurel.Parse.expr Syntax.Name <* eof) (StreamText input)
-
             either (throwError . RunError.TypeError) pure . Typecheck.runTypecheck $ do
               ty <- Typecheck.unknown
               _core <- Typecheck.checkExpr mempty absurd syntax ty
@@ -94,89 +92,175 @@ repl adapterRef inputs = do
   Streaming.yield "Welcome to the Laurel REPL. Type :quit to exit.\n"
   loop adapterRef inputs
 
+data Command
+  = Quit
+  | Connect (Syntax.Expr Void) (Syntax.Expr Void)
+  | Type (Syntax.Expr Void)
+  | Tables
+  | Eval (Syntax.Expr Void)
+  deriving (Eq, Show)
+
+data ParseCommandError
+  = ParseError ParseError
+  | UnknownCommand String
+  | IncorrectArgCount {command :: String, args :: [Syntax.Expr Void], expected :: Int}
+  deriving (Eq, Show)
+
+parseCommand :: String -> Either ParseCommandError Command
+parseCommand input = do
+  command <- first ParseError $ parse (commandParser <* eof) (StreamText $ Text.pack input)
+  case command of
+    Left expr ->
+      pure $ Eval expr
+    Right (name, args) ->
+      case name of
+        "quit" ->
+          case args of
+            [] ->
+              pure Quit
+            _ ->
+              Left $ IncorrectArgCount{command = name, args, expected = 0}
+        "connect" ->
+          case args of
+            [adapter, params] ->
+              pure $ Connect adapter params
+            _ ->
+              Left $ IncorrectArgCount{command = name, args, expected = 2}
+        "type" ->
+          case args of
+            [expr] ->
+              pure $ Type expr
+            _ ->
+              Left $ IncorrectArgCount{command = name, args, expected = 1}
+        "tables" ->
+          case args of
+            [] ->
+              pure Tables
+            _ ->
+              Left $ IncorrectArgCount{command = name, args, expected = 0}
+        _ ->
+          Left $ UnknownCommand name
+ where
+  commandParser :: Chars s => Parser s (Either (Syntax.Expr Void) (String, [Syntax.Expr Void]))
+  commandParser =
+    Right
+      <$ char ':'
+      <*> ( (,)
+              <$> token (some (noneOfSet CharSet.space))
+              <*> many (token $ Laurel.Parse.exprAtom Syntax.Name)
+          )
+      <|> Left <$> Laurel.Parse.expr Syntax.Name
+
+-- Right . Eval <$> Laurel.Parse.expr Syntax.Name
+
 loop :: IORef (Run IO) -> Stream (Of TerminalInput) IO () -> Stream (Of String) IO ()
 loop adapterRef =
   go $ \continue break inputs -> do
     Streaming.yield "> "
     (inputs', line) <- readLine inputs
-    case words line of
-      [":quit"] ->
-        break ()
-      ":connect" : adapter : args -> do
-        case adapter of
-          "postgres" ->
-            case parse (Laurel.Parse.expr Syntax.Name <* eof) (StreamText . Text.pack $ unwords args) of
+    case parseCommand line of
+      Left err -> do
+        Streaming.yield $ show err <> "\n"
+        continue inputs
+      Right command ->
+        case command of
+          Quit ->
+            break ()
+          Connect adapterExpr arg -> do
+            case Typecheck.runTypecheck $ Typecheck.checkExpr mempty absurd adapterExpr Type.string of
               Left err ->
                 Streaming.yield $ show err <> "\n"
-              Right expr ->
-                case Typecheck.runTypecheck $ Typecheck.checkExpr mempty absurd expr (Type.record [("host", Type.Name "String"), ("database", Type.Name "String")]) of
-                  Left err ->
-                    Streaming.yield $ show err <> "\n"
-                  Right core -> do
-                    value <- Laurel.Eval.eval mempty absurd core
-                    case value of
-                      Value.Record fields
-                        | Just (Value.String host) <- fields HashMap.!? "host"
-                        , Just (Value.String database) <- fields HashMap.!? "database" ->
-                            do
-                              result <-
-                                liftIO . Postgres.acquire $
-                                  Postgres.settings
-                                    (Text.Encoding.encodeUtf8 host)
-                                    5432
-                                    ""
-                                    ""
-                                    (Text.Encoding.encodeUtf8 database)
-                              case result of
-                                Left err ->
-                                  Streaming.yield $ show err <> "\n"
-                                Right connection -> do
-                                  liftIO $
-                                    writeIORef adapterRef
-                                      =<< Laurel.Postgres.Run.mkRun connection
-                                  Streaming.yield "connected\n"
-                      _ -> undefined
-          "csv" -> do
-            result <- liftIO $ Laurel.Csv.Run.mkRun (Vector.fromList args)
+              Right adapterCore -> do
+                adapterValue <- Laurel.Eval.eval mempty absurd adapterCore
+                case adapterValue of
+                  Value.String adapter ->
+                    case adapter of
+                      "postgres" ->
+                        case Typecheck.runTypecheck $ Typecheck.checkExpr mempty absurd arg (Type.record [("host", Type.Name "String"), ("database", Type.Name "String")]) of
+                          Left err ->
+                            Streaming.yield $ show err <> "\n"
+                          Right core -> do
+                            value <- Laurel.Eval.eval mempty absurd core
+                            case value of
+                              Value.Record fields
+                                | Just (Value.String host) <- fields HashMap.!? "host"
+                                , Just (Value.String database) <- fields HashMap.!? "database" ->
+                                    do
+                                      result <-
+                                        liftIO . Postgres.acquire $
+                                          Postgres.settings
+                                            (Text.Encoding.encodeUtf8 host)
+                                            5432
+                                            ""
+                                            ""
+                                            (Text.Encoding.encodeUtf8 database)
+                                      case result of
+                                        Left err ->
+                                          Streaming.yield $ show err <> "\n"
+                                        Right connection -> do
+                                          liftIO $
+                                            writeIORef adapterRef
+                                              =<< Laurel.Postgres.Run.mkRun connection
+                                          Streaming.yield "connected\n"
+                              _ -> undefined
+                      "csv" -> do
+                        case Typecheck.runTypecheck $ Typecheck.checkExpr mempty absurd arg (Type.list Type.string) of
+                          Left err ->
+                            Streaming.yield $ show err <> "\n"
+                          Right core -> do
+                            value <- Laurel.Eval.eval mempty absurd core
+                            case value of
+                              Value.List items -> do
+                                args <-
+                                  traverse
+                                    ( \case
+                                        Value.String item -> pure item
+                                        _ -> undefined
+                                    )
+                                    items
+                                result <- liftIO $ Laurel.Csv.Run.mkRun $ fmap Text.unpack args
+                                case result of
+                                  Left err ->
+                                    Streaming.yield $ show err <> "\n"
+                                  Right newAdapter -> do
+                                    liftIO $ writeIORef adapterRef newAdapter
+                                    Streaming.yield "connected\n"
+                              _ ->
+                                undefined
+                      _ -> do
+                        Streaming.yield $ show ("error: unknown adapter " <> show adapter) <> "\n"
+                  _ -> undefined
+            continue inputs'
+          Type expr -> do
+            Run{typeOf} <- lift $ readIORef adapterRef
+            result <- lift $ typeOf expr
             case result of
               Left err ->
                 Streaming.yield $ show err <> "\n"
-              Right newAdapter -> do
-                liftIO $ writeIORef adapterRef newAdapter
-                Streaming.yield "connected\n"
-          _ -> do
-            Streaming.yield $ show ("error: unknown adapter " <> show adapter) <> "\n"
-        continue inputs'
-      ":type" : args -> do
-        Run{typeOf} <- lift $ readIORef adapterRef
-        result <- lift . typeOf $ Text.pack (unwords args)
-        case result of
-          Left err ->
-            Streaming.yield $ show err <> "\n"
-          Right ty ->
-            Streaming.yield $ Text.unpack (prettyType ty) <> "\n"
-        continue inputs'
-      [":tables"] -> do
-        Run{definitions = getDefinitions} <- liftIO $ readIORef adapterRef
-        definitions <- liftIO getDefinitions
-        Streaming.yield $
-          Text.unpack
-            ( Pretty.unlines . Pretty.vertically $
-                Pretty.sepBy
-                  (fmap prettyDefinition definitions)
-                  (Pretty.line "")
-            )
-            <> "\n"
-        continue inputs'
-      _ -> do
-        Run{eval} <- lift $ readIORef adapterRef
-        result <- lift . eval $ Text.pack line
-        case result of
-          Left err ->
-            Streaming.yield $ show err <> "\n"
-          Right (value, ty) ->
-            Streaming.yield $ Text.unpack (Pretty.unlines $ pretty value ty) <> "\n"
-        continue inputs'
+              Right ty ->
+                Streaming.yield $ Text.unpack (prettyType ty) <> "\n"
+            continue inputs'
+          Tables -> do
+            Run{definitions = getDefinitions} <- liftIO $ readIORef adapterRef
+            definitions <- liftIO getDefinitions
+            Streaming.yield $
+              Text.unpack
+                ( Pretty.unlines . Pretty.vertically $
+                    Pretty.sepBy
+                      (fmap prettyDefinition definitions)
+                      (Pretty.line "")
+                )
+                <> "\n"
+            continue inputs'
+          Eval expr -> do
+            Run{eval} <- lift $ readIORef adapterRef
+            result <- lift $ eval expr
+            case result of
+              Left err ->
+                Streaming.yield $ show err <> "\n"
+              Right (value, ty) ->
+                Streaming.yield $ Text.unpack (Pretty.unlines $ pretty value ty) <> "\n"
+            continue inputs'
  where
   go :: Applicative m => (forall x. (s -> m x) -> (a -> m x) -> s -> m x) -> s -> m a
   go f = f (go f) pure

@@ -17,12 +17,11 @@ import qualified Data.Text.IO as Text.IO
 import Data.Traversable (for)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
-import Data.Void (absurd)
+import Data.Void (Void, absurd)
 import Laurel.Definition (Definition)
 import qualified Laurel.Definition as Definition
 import Laurel.Definition.Table (Table (..))
 import qualified Laurel.Eval
-import qualified Laurel.Parse as Parse
 import Laurel.Run (Run (..), RunError)
 import qualified Laurel.Run as RunError (RunError (..))
 import qualified Laurel.Syntax as Syntax
@@ -34,10 +33,7 @@ import Laurel.Value (Value)
 import qualified Laurel.Value as Value
 import qualified Laurel.Value.Pretty as Value.Pretty
 import qualified Pretty
-import Streaming.Chars.Text (StreamText (..))
 import qualified System.FilePath as FilePath
-import Text.Parser.Combinators (eof)
-import Text.Sage (parse)
 
 data CsvError
   = CsvError String
@@ -116,9 +112,9 @@ eval ::
   MonadIO m =>
   Vector Definition ->
   Vector (Text, Value) ->
-  Text ->
+  Syntax.Expr Void ->
   m (Either (RunError CsvError) (Value, Type))
-eval definitions context input =
+eval definitions context syntax =
   runExceptT $ do
     let tablesType =
           Type.record $
@@ -130,10 +126,6 @@ eval definitions context input =
 
     let tablesValue =
           Value.Record $ foldl' (\acc (key, value) -> HashMap.insert key value acc) mempty context
-
-    syntax <-
-      either (throwError . RunError.ParseError) pure $
-        parse (Parse.expr Syntax.Name <* eof) (StreamText input)
 
     (core, ty) <-
       either (throwError . RunError.TypeError) pure . runTypecheck $ do
@@ -158,9 +150,9 @@ pretty result =
 typeOf ::
   MonadIO m =>
   Vector Definition ->
-  Text ->
+  Syntax.Expr Void ->
   m (Either (RunError CsvError) Type)
-typeOf definitions input =
+typeOf definitions syntax =
   runExceptT $ do
     let tablesType =
           Type.record $
@@ -169,10 +161,6 @@ typeOf definitions input =
                   Definition.Table Table{name, outFields} -> Just (name, Type.App (Type.Name "Relation") $ Type.record outFields)
               )
               definitions
-
-    syntax <-
-      either (throwError . RunError.ParseError) pure $
-        parse (Parse.expr Syntax.Name <* eof) (StreamText input)
 
     either (throwError . RunError.TypeError) pure . runTypecheck $ do
       ty <- Typecheck.unknown
