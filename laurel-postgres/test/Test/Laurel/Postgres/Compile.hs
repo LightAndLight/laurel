@@ -91,6 +91,15 @@ spec = do
                 $ Where (Equals (Dot (Type.Name "Int") (Var $ F $ B ()) "id") (Dot (Type.Name "Int") (Var $ B ()) "id")) (Yield $ Var $ F $ B ())
             , "SELECT person1 FROM people AS person1 INNER JOIN people AS person2 ON person1.id = person2.id"
             )
+          , ( "[1, 2, 3, 4]"
+            , List [Int 1, Int 2, Int 3, Int 4]
+            , "VALUES(1, 2, 3, 4)"
+            )
+          , ( "for person in people yield [1, 2, 3]"
+            , For "person" (Type.Name "Person") (Name "people") . toScope $
+                Yield (List [Int 1, Int 2, Int 3])
+            , "SELECT VALUES(1, 2, 3) AS it FROM people AS person"           
+            )
           ]
       for_ testCases $ \(label, input, expected) ->
         it ("compiles \"" <> label <> "\"") $ do
