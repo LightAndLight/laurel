@@ -9,7 +9,7 @@ and eventually turn it into something I actually use.
 
 Goals:
 
-* Syntax that's closer to the monadic semantics of relations
+* Syntax that makes monadic semantics more apparent
 
   Multisets and lists are two data structures commonly manipulated in query languages such as SQL. These collection types are inherently monadic but SQL obscures this.
   
@@ -34,6 +34,12 @@ Goals:
   
   In other words, that SQL query is equivalent to `VALUES (2)`. I find it way easier to do equational reasoning with a syntax that makes the monad
   laws explicit, rather than whatever arcane stuff is going on in SQL.
+  
+  In Laurel, `return` is called `yield` and `bind ma (\a -> mb)` is written `for a in ma mb`. The monad laws show up as:
+  
+  * `for a in (yield x) mb = mb[a := x]` (left identity)
+  * `for a in ma yield a = ma` (right identity)
+  * `for b in (for a in ma mb) mc = for a in ma for b in mb mc` (associativity)
   
 * Left-to-right syntax
 
